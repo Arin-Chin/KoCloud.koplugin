@@ -125,14 +125,14 @@ function KoCloud:onDispatcherRegisterActions()
     Dispatcher:registerAction("kocloud_sync_annotations", {
         category = "none",
         event = "KoCloudSyncAnnotations",
-        title = _("Sync annotations now"),
+        title = _("KoCloud: Sync annotations now"),
         help = _("Sync the current book's annotations with the cloud."),
         general = true,
     })
     Dispatcher:registerAction("kocloud_sync_progress", {
         category = "none",
         event = "KoCloudSyncProgress",
-        title = _("Sync reading progress now"),
+        title = _("KoCloud: Sync reading progress now"),
         help = _("Sync the current book's reading progress with the cloud."),
         general = true,
     })

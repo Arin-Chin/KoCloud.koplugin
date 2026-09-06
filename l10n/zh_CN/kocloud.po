@@ -177,16 +177,16 @@ msgid "Jump"
 msgstr "跳转"
 
 #: main.lua
-msgid "Sync annotations now"
-msgstr "立即同步标注"
+msgid "KoCloud: Sync annotations now"
+msgstr "KoCloud：立即同步标注"
 
 #: main.lua
 msgid "Sync the current book's annotations with the cloud."
 msgstr "将当前书籍的标注同步到云端。"
 
 #: main.lua
-msgid "Sync reading progress now"
-msgstr "立即同步阅读进度"
+msgid "KoCloud: Sync reading progress now"
+msgstr "KoCloud：立即同步阅读进度"
 
 #: main.lua
 msgid "Sync the current book's reading progress with the cloud."
