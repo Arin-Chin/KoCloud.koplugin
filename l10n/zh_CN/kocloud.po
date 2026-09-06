@@ -199,3 +199,35 @@ msgstr "KoCloud 云同步尚未配置。请在 工具 → KoCloud 中设置。"
 #: main.lua
 msgid "Invalid port. Use an integer between 1 and 65535."
 msgstr "端口无效。请使用 1–65535 之间的整数。"
+
+#: main.lua
+msgid "KoCloud: Sync current book (annotations)"
+msgstr "KoCloud：同步当前书籍（标注）"
+
+#: main.lua
+msgid "KoCloud: Sync current book (progress)"
+msgstr "KoCloud：同步当前书籍（进度）"
+
+#: main.lua
+msgid "KoCloud: Sync all books now (annotations)"
+msgstr "KoCloud：立即同步所有书籍（标注）"
+
+#: main.lua
+msgid "KoCloud: Sync all books now (progress)"
+msgstr "KoCloud：立即同步所有书籍（进度）"
+
+#: main.lua
+msgid "KoCloud: a sync is already running."
+msgstr "KoCloud：已有同步任务正在进行。"
+
+#: main.lua
+msgid "KoCloud: no book is open."
+msgstr "KoCloud：当前没有打开书籍。"
+
+#: main.lua
+msgid "Sync every annotated book with the cloud."
+msgstr "将每一本有标注的书籍同步到云端。"
+
+#: main.lua
+msgid "Sync every book's reading progress with the cloud."
+msgstr "将每一本书的阅读进度同步到云端。"

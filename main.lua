@@ -120,35 +120,60 @@ end
 
 -- Make KoCloud actions available to KOReader's own action system
 -- (gesture actions / menu “edit actions” lists), like other plugins.
+-- Four actions mirror the two channels' manual entries: current-book and
+-- sync-all for annotations and for reading progress.
 function KoCloud:onDispatcherRegisterActions()
     local Dispatcher = require("dispatcher")
-    Dispatcher:registerAction("kocloud_sync_annotations", {
+    Dispatcher:registerAction("kocloud_sync_current_annotations", {
         category = "none",
-        event = "KoCloudSyncAnnotations",
-        title = _("KoCloud: Sync annotations now"),
+        event = "KoCloudSyncCurrentAnnotations",
+        title = _("KoCloud: Sync current book (annotations)"),
         help = _("Sync the current book's annotations with the cloud."),
         general = true,
     })
-    Dispatcher:registerAction("kocloud_sync_progress", {
+    Dispatcher:registerAction("kocloud_sync_current_progress", {
         category = "none",
-        event = "KoCloudSyncProgress",
-        title = _("KoCloud: Sync reading progress now"),
+        event = "KoCloudSyncCurrentProgress",
+        title = _("KoCloud: Sync current book (progress)"),
         help = _("Sync the current book's reading progress with the cloud."),
+        general = true,
+    })
+    Dispatcher:registerAction("kocloud_sync_all_annotations", {
+        category = "none",
+        event = "KoCloudSyncAllAnnotations",
+        title = _("KoCloud: Sync all books now (annotations)"),
+        help = _("Sync every annotated book with the cloud."),
+        general = true,
+    })
+    Dispatcher:registerAction("kocloud_sync_all_progress", {
+        category = "none",
+        event = "KoCloudSyncAllProgress",
+        title = _("KoCloud: Sync all books now (progress)"),
+        help = _("Sync every book's reading progress with the cloud."),
         general = true,
     })
 end
 
-function KoCloud:onKoCloudSyncAnnotations()
-    self:dispatcherSync("annotations")
+function KoCloud:onKoCloudSyncCurrentAnnotations()
+    self:dispatcherSync("annotations", "book")
 end
 
-function KoCloud:onKoCloudSyncProgress()
-    self:dispatcherSync("progress")
+function KoCloud:onKoCloudSyncCurrentProgress()
+    self:dispatcherSync("progress", "book")
 end
 
--- Shared guard for gesture-triggered syncs.
-function KoCloud:dispatcherSync(channel)
-    if not self.document or not self.document.file then return end
+function KoCloud:onKoCloudSyncAllAnnotations()
+    self:dispatcherSync("annotations", "all")
+end
+
+function KoCloud:onKoCloudSyncAllProgress()
+    self:dispatcherSync("progress", "all")
+end
+
+-- Shared guard for gesture-triggered syncs. mode = "book" (current book) or
+-- "all" (every annotated book).
+function KoCloud:dispatcherSync(channel, mode)
+    mode = mode or "book"
     local configured = (channel == "progress" and Sync.isProgressConfigured())
         or (channel == "annotations" and Sync.isConfigured())
         or false
@@ -160,8 +185,27 @@ function KoCloud:dispatcherSync(channel)
         })
         return
     end
-    if Sync.isBusy() then return end
-    self:syncCurrentBook(channel, true)
+    if Sync.isBusy() then
+        local InfoMessage = require("ui/widget/infomessage")
+        UIManager:show(InfoMessage:new{
+            text = _("KoCloud: a sync is already running."),
+            timeout = 2,
+        })
+        return
+    end
+    if mode == "book" then
+        if not self.document or not self.document.file then
+            local InfoMessage = require("ui/widget/infomessage")
+            UIManager:show(InfoMessage:new{
+                text = _("KoCloud: no book is open."),
+                timeout = 2,
+            })
+            return
+        end
+        self:syncCurrentBook(channel, true)
+    else
+        Sync.startJob(channel, false)
+    end
 end
 
 function KoCloud:isRunning()

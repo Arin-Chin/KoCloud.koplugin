@@ -259,8 +259,9 @@ two devices recommended for sync tests. Logs: `crash.log` on the device
     with "later" the larger percent wins (previously the first-syncer's value won).
 
 ### E. Dispatcher / actions
-19. Tools → (gesture manager) new gesture → action list shows
-    **KoCloud: Sync annotations now** and **KoCloud: Sync reading progress now**.
+19. Tools → (gesture manager) new gesture → action list shows all four
+    **KoCloud: Sync current book (annotations) / (progress)** and
+    **KoCloud: Sync all books now (annotations) / (progress)**.
 20. Trigger the annotation gesture without a cloud server configured → short
     "not configured" toast, no silent no-op.
 
