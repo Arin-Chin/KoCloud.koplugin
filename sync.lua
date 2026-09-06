@@ -146,7 +146,7 @@ local function read_json_array(path)
     if not f then return nil, false end -- missing file is normal
     local content = f:read("*all")
     f:close()
-    if not content or content == "" then return nil, true end
+    if not content or content == "" then return nil, false end -- empty ~ missing
     local ok, data = pcall(rapidjson.decode, content)
     if not ok or type(data) ~= "table" then return nil, true end -- corrupt
     destringify_ext_keys(data)
@@ -423,17 +423,19 @@ function Sync.syncBook(doc_path, live_annotations, opts)
     local ok, err = pcall(function()
         SyncService.sync(server, carrier, function(local_path, cached_path, income_path)
             local local_carrier, c1 = read_json_array(local_path)
-            local cached, c2 = read_json_array(cached_path)
-            local incoming, c3 = read_json_array(income_path)
-            if c1 or c2 or c3 then
-                -- corrupt carrier: never treat as empty (would look like a
-                -- full local/remote deletion and clear the shared state)
-                logger.warn("KoCloud: corrupt sync carrier, skipping book")
+            local cached = read_json_array(cached_path)
+            local incoming = read_json_array(income_path)
+            if c1 then
+                -- Only a corrupt LOCAL carrier is fatal (treating it as empty
+                -- would look like a full local deletion and clear the shared
+                -- state). Cached/remote copies may be left non-JSON by the
+                -- provider (e.g. a 404 body) and are treated as absent here.
+                logger.warn("KoCloud: corrupt local sync carrier, skipping book")
                 return false
             end
-            local local_list = local_carrier or {}
             cached = cached or {}
             incoming = incoming or {}
+            local local_list = local_carrier or {}
             local merged = Sync.mergeAnnotations(local_list, incoming, cached)
             write_json_array(local_path, merged) -- keep the carrier current
             if opts.apply_live then
@@ -574,17 +576,17 @@ function Sync.syncBookProgress(doc_path, opts)
     local perr = pcall(function()
         SyncService.sync(server, carrier, function(local_path, cached_path, income_path)
             local function read_payload(fpath)
-                local arr, corrupt = read_json_array(fpath)
-                if corrupt then return nil, true end
-                return arr and arr[1] or nil, false
+                local arr = read_json_array(fpath) -- corrupt remote/cached ~ absent
+                return arr and arr[1] or nil
             end
-            local local_p, c1 = read_payload(local_path)
-            local cached_p, c2 = read_payload(cached_path)
-            local server_p, c3 = read_payload(income_path)
-            if c1 or c2 or c3 then
-                logger.warn("KoCloud: corrupt progress carrier, skipping book")
+            local local_arr, local_corrupt = read_json_array(local_path)
+            if local_corrupt then
+                logger.warn("KoCloud: corrupt local progress carrier, skipping book")
                 return false
             end
+            local local_p = local_arr and local_arr[1] or nil
+            local cached_p = read_payload(cached_path)
+            local server_p = read_payload(income_path)
             if not server_p then server_p = cached_p end
             local chosen = merge_progress(local_p, server_p, cached_p, p.conflict or "later")
             if chosen and chosen ~= local_p then
