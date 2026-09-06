@@ -177,6 +177,29 @@ pushes it through the annotation channel's cloud account:
 - **License**: MIT
 - **Version**: 1.1.0
 
+## 🗂️ Sync identity (read first)
+
+A book is identified on the cloud by its **sidecar directory basename** (the
+book file name, e.g. `Name.epub.sdr`). For sync to work across devices:
+
+- The **book file name must be identical on every device**. Different library
+  roots are fine — only the basename is used (an earlier build hashed the full
+  path, which split devices with different roots into separate cloud files).
+- All devices must use the **same cloud folder** for the channel.
+- Devices should use the same KOReader metadata-location setting (sidecar /
+  hash-based) so the same book resolves to the same basename.
+
+Other notes:
+
+- First sync of a book logs a harmless `WebDavApi: Download failure: 404` —
+  that just means "not on the cloud yet"; the file is then uploaded.
+- Two different books that happen to share one file name (in different folders)
+  would collide on the cloud — rename one of them.
+- Orphan files named `*-xxxxxxxx.json` in the cloud folder (left by an
+  experimental build) can be deleted; current builds use plain `*.json` /
+  `*.progress.json`.
+
+---
 ---
 
 ## 🧪 Manual Test Checklist — v1.1.0 (post-audit fixes)
