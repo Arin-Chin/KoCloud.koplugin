@@ -114,7 +114,53 @@ local EXT_TO_CTYPE = {
 
 function KoCloud:init()
     self.port = G_reader_settings:readSetting("kodashboard_port", "8686")
+    self:onDispatcherRegisterActions()
     self.ui.menu:registerToMainMenu(self)
+end
+
+-- Make KoCloud actions available to KOReader's own action system
+-- (gesture actions / menu “edit actions” lists), like other plugins.
+function KoCloud:onDispatcherRegisterActions()
+    local Dispatcher = require("dispatcher")
+    Dispatcher:registerAction("kocloud_sync_annotations", {
+        category = "none",
+        event = "KoCloudSyncAnnotations",
+        title = _("Sync annotations now"),
+        help = _("Sync the current book's annotations with the cloud."),
+        general = true,
+    })
+    Dispatcher:registerAction("kocloud_sync_progress", {
+        category = "none",
+        event = "KoCloudSyncProgress",
+        title = _("Sync reading progress now"),
+        help = _("Sync the current book's reading progress with the cloud."),
+        general = true,
+    })
+end
+
+function KoCloud:onKoCloudSyncAnnotations()
+    self:dispatcherSync("annotations")
+end
+
+function KoCloud:onKoCloudSyncProgress()
+    self:dispatcherSync("progress")
+end
+
+-- Shared guard for gesture-triggered syncs.
+function KoCloud:dispatcherSync(channel)
+    if not self.document or not self.document.file then return end
+    local configured = channel == "progress"
+        and Sync.isProgressConfigured() or Sync.isConfigured()
+    if not configured then
+        local InfoMessage = require("ui/widget/infomessage")
+        UIManager:show(InfoMessage:new{
+            text = _("KoCloud cloud sync is not configured yet. Set it up in Tools → KoCloud."),
+            timeout = 3,
+        })
+        return
+    end
+    if Sync.isBusy() then return end
+    self:syncCurrentBook(channel, true)
 end
 
 function KoCloud:isRunning()
