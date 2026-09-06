@@ -404,16 +404,14 @@ function Sync.syncBook(doc_path, live_annotations, opts)
         return nil, "cannot create sidecar dir"
     end
     local dir_name = sidecar_dir:match("([^/]+)/*$") or "annotations"
-    -- Remote filename must stay unique across devices: two books in different
-    -- folders with the same sidecar dir name would otherwise collide (SyncService
-    -- names the remote file after the local basename). Hash the dir into the name.
-    local dir_hash = ""
-    do
-        local h = 0
-        for i = 1, #sidecar_dir do h = (h * 131 + sidecar_dir:byte(i)) % 4294967296 end
-        dir_hash = string.format("-%08x", h)
-    end
-    local carrier = sidecar_dir .. "/" .. dir_name:gsub("[^%w%.%-%_]", "_") .. dir_hash .. ".json"
+    -- Cross-device identity: the carrier's remote name must be the SAME on
+    -- every device for a given book. Only the sidecar dir BASENAME is stable
+    -- across devices (book file name); hashing the full path (as earlier
+    -- audit "fix" did) broke sync between devices with different library
+    -- roots. Constraint (same as upstream): devices must use the same book
+    -- file name. Two different books sharing one file name in different
+    -- folders would collide — accepted, documented.
+    local carrier = sidecar_dir .. "/" .. dir_name:gsub("[^%w%.%-%_]", "_") .. ".json"
     if not write_json_array(carrier, local_list) then
         if ds then pcall(function() ds:close() end) end
         return nil, "cannot write sync file"
@@ -549,13 +547,8 @@ function Sync.syncBookProgress(doc_path, opts)
         return nil, "cannot create sidecar dir"
     end
     local dir_name = sidecar_dir:match("([^/]+)/*$") or "annotations"
-    local dir_hash = ""
-    do
-        local h = 0
-        for i = 1, #sidecar_dir do h = (h * 131 + sidecar_dir:byte(i)) % 4294967296 end
-        dir_hash = string.format("-%08x", h)
-    end
-    local carrier = sidecar_dir .. "/" .. dir_name:gsub("[^%w%.%-%_]", "_") .. dir_hash .. ".progress.json"
+    -- Same cross-device identity rule as the annotation channel: basename only.
+    local carrier = sidecar_dir .. "/" .. dir_name:gsub("[^%w%.%-%_]", "_") .. ".progress.json"
     if type(opts.live_xp) == "string" then
         local live = progress_payload(ds)
         live.xp = opts.live_xp
