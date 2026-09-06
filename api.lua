@@ -541,6 +541,69 @@ function Api.handleRequest(server, reqinfo, path, full_uri)
         return server:sendResponse(reqinfo, 200, CTYPE.JSON, JSON.encode({ ok = started, running = started }))
     end
 
+    -- Web mirrors of the per-channel menu toggles: progress conflict
+    -- preference and the auto-sync switches (settings live on the device).
+    if path == "/api/cloud/progress/conflict" then
+        if reqinfo.method ~= "POST" then
+            return server:sendResponse(reqinfo, 405, CTYPE.JSON, '{"ok":false,"error":"Only POST supported"}')
+        end
+        local ok_body, data = pcall(JSON.decode, reqinfo.body or "")
+        local value = ok_body and type(data) == "table" and data.value or nil
+        if value ~= "later" and value ~= "earlier" then
+            return server:sendResponse(reqinfo, 400, CTYPE.JSON, '{"ok":false,"error":"invalid value"}')
+        end
+        local p = Sync.getProgressSettings()
+        p.conflict = value
+        Sync.saveProgressSettings(p)
+        return server:sendResponse(reqinfo, 200, CTYPE.JSON, '{"ok":true,"conflict":"' .. value .. '"}')
+    end
+
+    if path == "/api/cloud/settings/auto" then
+        if reqinfo.method ~= "POST" then
+            return server:sendResponse(reqinfo, 405, CTYPE.JSON, '{"ok":false,"error":"Only POST supported"}')
+        end
+        local ok_body, data = pcall(JSON.decode, reqinfo.body or "")
+        local channel = ok_body and type(data) == "table" and data.channel or nil
+        local key = ok_body and type(data) == "table" and data.key or nil
+        local on = ok_body and type(data) == "table" and data.on == true
+        if (channel ~= "annotations" and channel ~= "progress")
+            or (key ~= "open" and key ~= "close" and key ~= "resume") then
+            return server:sendResponse(reqinfo, 400, CTYPE.JSON, '{"ok":false,"error":"invalid args"}')
+        end
+        if channel == "progress" then
+            local p = Sync.getProgressSettings()
+            p.auto[key] = on
+            Sync.saveProgressSettings(p)
+        else
+            local s = Sync.getSettings()
+            s["sync_on_" .. key] = on
+            Sync.saveSettings(s)
+        end
+        return server:sendResponse(reqinfo, 200, CTYPE.JSON, '{"ok":true}')
+    end
+
+    -- Sync the most recently opened book only ("current book" seen from the
+    -- web side; the live reader instance keeps its own in-menu sync).
+    if path == "/api/cloud/annotations/current" or path == "/api/cloud/progress/current" then
+        if reqinfo.method ~= "POST" then
+            return server:sendResponse(reqinfo, 405, CTYPE.JSON, '{"ok":false,"error":"Only POST supported"}')
+        end
+        if Sync.isBusy() then
+            return server:sendResponse(reqinfo, 200, CTYPE.JSON, '{"ok":false,"busy":true,"error":"sync already running"}')
+        end
+        local book = Api.latestBook()
+        if not book then
+            return server:sendResponse(reqinfo, 200, CTYPE.JSON, '{"ok":false,"error":"no book to sync"}')
+        end
+        local channel = path:match("/api/cloud/(%w+)/current")
+        local started = Sync.startJob(channel, true, { book })
+        return server:sendResponse(reqinfo, 200, CTYPE.JSON, JSON.encode({
+            ok = started,
+            running = started,
+            book = book.title or "",
+        }))
+    end
+
     local upload_cover_book_ref = path:match("^/api/books/([^/]+)/upload%-cover$")
     if upload_cover_book_ref then
         if reqinfo.method ~= "POST" then
@@ -701,6 +764,20 @@ end
 
 function Api.getCloudActivity()
     return Sync.jobStatus()
+end
+
+-- Most recently opened book that has annotations metadata (used by the web
+-- "sync current book" buttons).
+function Api.latestBook()
+    local best, best_ts = nil, -1
+    for _, b in ipairs(DataLoader:getBooks() or {}) do
+        local ts = tonumber(b.last_open_ts) or 0
+        if ts > best_ts then
+            best_ts = ts
+            best = b
+        end
+    end
+    return best
 end
 
 function Api.getBooks()

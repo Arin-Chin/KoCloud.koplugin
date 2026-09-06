@@ -711,9 +711,9 @@ end
 -- Start a job stepping through books on the UI loop (per-channel runner).
 -- channel: "annotations" | "progress". live/sidecar opts only used for the
 -- single-book "current" action, so batch jobs pass nil and sync closed books.
-function Sync.startJob(channel, silent)
+function Sync.startJob(channel, silent, books_override)
     if Sync.isBusy() then return false end
-    local books = books_with_metadata()
+    local books = books_override or books_with_metadata()
     local j = Sync.job
     j.id = j.id + 1
     j.running = true

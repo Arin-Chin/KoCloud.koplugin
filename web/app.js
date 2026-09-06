@@ -38,6 +38,10 @@ const I18N = {
   'Cloud folder: %1': '云端文件夹：%1',
   'Sync all annotations now': '立即同步全部标注',
   'Sync started': '已开始同步',
+  'Sync current book': '同步当前书籍',
+  'Sync all books': '同步所有书籍',
+  'Covers': '封面',
+  'No recent book to sync': '没有可同步的最近书籍',
   'Cloud sync unavailable': '云端同步不可用',
   'No sync job yet': '暂无同步记录',
   'Running': '同步中',
@@ -2610,6 +2614,42 @@ async function startCloudProgress() {
   }
 }
 
+// Sync the most recently opened book on this device ("current book").
+async function startCloudCurrent(channel) {
+  const id = channel === 'progress' ? 'cloudProgressCurrentBtn' : 'cloudCurrentBtn';
+  const btn = document.getElementById(id);
+  if (btn) btn.disabled = true;
+  try {
+    const res = await apiNoCachePost('cloud/' + channel + '/current');
+    if (res && res.ok === false && res.error === 'no book to sync') {
+      window.alert(t('No recent book to sync'));
+    }
+    renderCloud();
+    pollCloudActivity();
+  } catch (e) {
+    if (btn) btn.disabled = false;
+    window.alert(t('Cloud sync failed: %1', e && e.message ? e.message : String(e)));
+  }
+}
+
+async function setCloudConflict(value) {
+  try {
+    await apiNoCachePost('cloud/progress/conflict', { value });
+    renderCloud();
+  } catch (e) {
+    window.alert(t('Cloud sync failed: %1', e && e.message ? e.message : String(e)));
+  }
+}
+
+async function toggleCloudAuto(channel, key, on) {
+  try {
+    await apiNoCachePost('cloud/settings/auto', { channel, key, on });
+    renderCloud();
+  } catch (e) {
+    window.alert(t('Cloud sync failed: %1', e && e.message ? e.message : String(e)));
+  }
+}
+
 async function renderCloud() {
   clearCloudPoll();
   const cloudToken = renderToken;
@@ -2649,13 +2689,19 @@ async function renderCloud() {
       <section class="stats-layout">
         <article class="panel cloud-actions-panel">
           <div class="section-head">
-            <div><div class="section-kicker">${t('Annotations')}</div><h2>${t('Sync all annotations now')}</h2></div>
+            <div><div class="section-kicker">${t('Annotations')}</div><h2>${t('Annotations')}</h2></div>
           </div>
           <div class="cloud-actions">
             <div class="cloud-actions-row">
-              <button class="ghost-btn" id="cloudSyncBtn" ${(status && status.configured && !(status && status.busy)) ? '' : 'disabled'}>
-                ${icon('cloud', 16)} ${t('Sync all annotations now')}
-              </button>
+              <button class="ghost-btn" id="cloudCurrentBtn" ${(status && status.configured && !(status && status.busy)) ? '' : 'disabled'} title="${t('Sync current book')}">${icon('cloud', 14)} ${t('Sync current book')}</button>
+              <button class="ghost-btn" id="cloudSyncBtn" ${(status && status.configured && !(status && status.busy)) ? '' : 'disabled'} title="${t('Sync all books')}">${icon('cloud', 14)} ${t('Sync all books')}</button>
+            </div>
+            <div class="cloud-actions-row">
+              <span class="section-note" style="margin:0">${t('Auto-sync')}:</span>
+              ${['open', 'close', 'resume'].map((k) => `<button class="pill month-pill ${(status && status.auto && status.auto[k]) ? 'active' : ''}" type="button" data-cloud-auto="${k}" data-channel="annotations">${t(k === 'open' ? 'on book open' : k === 'close' ? 'on book close' : 'on resume')}</button>`).join('')}
+            </div>
+            <div class="cloud-actions-row">
+              <span class="section-note" style="margin:0">${t('Covers')}:</span>
               <button class="ghost-btn" id="cloudBackupBtn" ${(status && status.configured && !(status && status.busy)) ? '' : 'disabled'}>${icon('cloud', 14)} ${t('Backup covers')}</button>
               <button class="ghost-btn" id="cloudRestoreBtn" ${(status && status.configured && !(status && status.busy)) ? '' : 'disabled'}>${icon('cloud', 14)} ${t('Restore covers')}</button>
             </div>
@@ -2666,22 +2712,25 @@ async function renderCloud() {
 
         <article class="panel cloud-actions-panel">
           <div class="section-head">
-            <div><div class="section-kicker">${t('Progress sync')}</div><h2>${t('Sync reading progress now')}</h2></div>
+            <div><div class="section-kicker">${t('Progress sync')}</div><h2>${t('Progress sync')}</h2></div>
           </div>
           <div class="cloud-actions">
             <div class="cloud-actions-row">
-              <button class="ghost-btn" id="cloudProgressBtn" ${(status && status.available && status.progress && status.progress.configured && !(status && status.busy)) ? '' : 'disabled'}>
-                ${icon('cloud', 16)} ${t('Sync reading progress now')}
-              </button>
+              <button class="ghost-btn" id="cloudProgressCurrentBtn" ${(status && status.available && status.progress && status.progress.configured && !(status && status.busy)) ? '' : 'disabled'} title="${t('Sync current book')}">${icon('cloud', 14)} ${t('Sync current book')}</button>
+              <button class="ghost-btn" id="cloudProgressBtn" ${(status && status.available && status.progress && status.progress.configured && !(status && status.busy)) ? '' : 'disabled'} title="${t('Sync all books')}">${icon('cloud', 14)} ${t('Sync all books')}</button>
+            </div>
+            <div class="cloud-actions-row">
+              <span class="section-note" style="margin:0">${t('On conflict')}:</span>
+              <button class="pill month-pill ${status && status.progress && status.progress.conflict !== 'earlier' ? 'active' : ''}" type="button" data-conflict="later">${t('Use later progress')}</button>
+              <button class="pill month-pill ${status && status.progress && status.progress.conflict === 'earlier' ? 'active' : ''}" type="button" data-conflict="earlier">${t('Use earlier progress')}</button>
+            </div>
+            <div class="cloud-actions-row">
+              <span class="section-note" style="margin:0">${t('Auto-sync')}:</span>
+              ${['open', 'close', 'resume'].map((k) => `<button class="pill month-pill ${(status && status.progress && status.progress.auto && status.progress.auto[k]) ? 'active' : ''}" type="button" data-cloud-auto="${k}" data-channel="progress">${t(k === 'open' ? 'on book open' : k === 'close' ? 'on book close' : 'on resume')}</button>`).join('')}
             </div>
             <p class="section-note">${status && status.progress && status.progress.configured
               ? (status.progress.name ? esc(status.progress.name) : '') + (status.progress.path ? ' · ' + esc(status.progress.path) : '')
               : ''}</p>
-            <p class="section-note">${t('On conflict')}: ${status && status.progress && status.progress.conflict !== 'earlier'
-              ? t('Use later progress')
-              : t('Use earlier progress')}${status && status.progress && status.progress.auto
-                ? ' · ' + [status.progress.auto.open && t('on book open'), status.progress.auto.close && t('on book close'), status.progress.auto.resume && t('on resume')].filter(Boolean).join(' / ')
-                : ''}</p>
             <p class="section-note">${status && !status.progress.configured ? t('Configure in KOReader menu: Tools → KoCloud → Progress sync.') : ''}</p>
           </div>
         </article>
@@ -2705,10 +2754,17 @@ async function renderCloud() {
     </div>`;
 
   if (cloudToken !== renderToken) return; // stale render (still poll if started)
+  document.getElementById('cloudCurrentBtn')?.addEventListener('click', () => startCloudCurrent('annotations'));
   document.getElementById('cloudSyncBtn')?.addEventListener('click', startCloudSync);
   document.getElementById('cloudBackupBtn')?.addEventListener('click', () => startCloudCover('backup'));
   document.getElementById('cloudRestoreBtn')?.addEventListener('click', () => startCloudCover('restore'));
+  document.getElementById('cloudProgressCurrentBtn')?.addEventListener('click', () => startCloudCurrent('progress'));
   document.getElementById('cloudProgressBtn')?.addEventListener('click', startCloudProgress);
+  document.querySelectorAll('[data-conflict]').forEach((b) => b.addEventListener('click', () => setCloudConflict(b.dataset.conflict)));
+  document.querySelectorAll('[data-cloud-auto]').forEach((b) => b.addEventListener('click', () => {
+    const on = !b.classList.contains('active');
+    toggleCloudAuto(b.dataset.channel, b.dataset.cloudAuto, on);
+  }));
   bindTooltips($content);
   if (act && act.running) pollCloudActivity();
 }
