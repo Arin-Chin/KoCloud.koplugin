@@ -76,6 +76,11 @@ if not ok_styles then
     logger.warn("KoCloud: fancy highlight styles mount failed:", styles_err)
 end
 
+-- Module-level guard: reloadDocument() closes the current ReaderUI and creates a
+-- fresh plugin instance, so a per-instance flag would be lost and auto-sync
+-- would reload forever. The flag must survive across instances.
+local kocloud_reloading = false
+
 local KoCloud = WidgetContainer:extend{
     name = "KoCloud",
     is_doc_only = false,
@@ -640,7 +645,7 @@ function KoCloud:syncCurrentBook(channel, reload)
         apply_live = function(merged)
             ui.annotation.annotations = merged
             if is_reload then
-                self.is_reloading_due_to_sync = true
+                kocloud_reloading = true
                 UIManager:tickAfterNext(function() ui:reloadDocument() end)
             end
             return true
@@ -651,8 +656,8 @@ end
 -- Reader-context events: dispatch each configured channel per its own auto
 -- toggles (annotations under highlight_sync, progress under kocloud_progress).
 function KoCloud:onReaderReady()
-    if self.is_reloading_due_to_sync then
-        self.is_reloading_due_to_sync = false
+    if kocloud_reloading then
+        kocloud_reloading = false
         return
     end
     -- A progress value may have been applied by a background (closed-book)
@@ -693,7 +698,7 @@ function KoCloud:onReaderReady()
 end
 
 function KoCloud:onCloseDocument()
-    if self.is_reloading_due_to_sync then return end
+    if kocloud_reloading then return end
     local s = Sync.getSettings()
     if s.sync_on_close and Sync.isConfigured() then
         self:syncCurrentBook("annotations", false)
