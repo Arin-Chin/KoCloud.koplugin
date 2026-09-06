@@ -195,3 +195,7 @@ msgstr "将当前书籍的阅读进度同步到云端。"
 #: main.lua
 msgid "KoCloud cloud sync is not configured yet. Set it up in Tools → KoCloud."
 msgstr "KoCloud 云同步尚未配置。请在 工具 → KoCloud 中设置。"
+
+#: main.lua
+msgid "Invalid port. Use an integer between 1 and 65535."
+msgstr "端口无效。请使用 1–65535 之间的整数。"

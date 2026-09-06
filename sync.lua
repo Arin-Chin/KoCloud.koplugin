@@ -68,177 +68,7 @@ end
 
 function Sync.isConfigured()
     local s = Sync.getSettings()
-    -------------------------------------------------------------------------------
--- Cover cache backup / restore
--------------------------------------------------------------------------------
--- Covers are a regenerable cache: all files under the covers dir are packed
--- into ONE self-describing container ("name|offset|length" index + raw bytes,
--- no compression) and pushed through SyncService.sync. Backup keeps the local
--- container as source of truth; restore pulls the remote one and unpacks it
--- over the local covers dir.
-local DataStorage = require("datastorage")
-
-local COVERS_FILE = "kodashboard-covers.bin"
-
-local function covers_dir()
-    return (DataStorage:getDataDir() or ".") .. "/kodashboard/covers"
-end
-
-local function pack_covers_into(path)
-    local dir = covers_dir()
-    if lfs.attributes(dir, "mode") ~= "directory" then return false, "no covers dir" end
-    local entries = {}
-    for entry in lfs.dir(dir) do
-        local fpath = dir .. "/" .. entry
-        if entry ~= "." and entry ~= ".." and lfs.attributes(fpath, "mode") == "file" then
-            entries[#entries + 1] = { name = entry, path = fpath }
-        end
-    end
-    if #entries == 0 then return false, "no covers to backup" end
-    table.sort(entries, function(a, b) return a.name < b.name end)
-    local index = {}
-    local offset = 0
-    for _, e in ipairs(entries) do
-        index[#index + 1] = string.format("%s|%d|%d", e.name, offset, lfs.attributes(e.path, "size") or 0)
-        offset = offset + (lfs.attributes(e.path, "size") or 0)
-    end
-    local out = io.open(path, "wb")
-    if not out then return false, "cannot write cover pack" end
-    out:write("KDCOVER1\n")
-    out:write(table.concat(index, "\n") .. "\n\n")
-    for _, e in ipairs(entries) do
-        local f = io.open(e.path, "rb")
-        if f then
-            out:write(f:read("*a"))
-            f:close()
-        end
-    end
-    out:close()
-    return true, nil, #entries
-end
-
-local function unpack_covers_from(path)
-    local f = io.open(path, "rb")
-    if not f then return false, "cover pack not found" end
-    local content = f:read("*a")
-    f:close()
-    local magic, rest = content:match("^KDCOVER1\n(.*)$")
-    if not magic then return false, "invalid cover pack" end
-    local index_text, payload = rest:match("^(.-)\n\n(.*)$")
-    if not index_text then return false, "invalid cover pack" end
-    local dir = covers_dir()
-    if lfs.attributes(dir, "mode") ~= "directory" then
-        if not lfs.mkdir(dir) and lfs.attributes(dir, "mode") ~= "directory" then
-            return false, "cannot create covers dir"
-        end
-    end
-    local count = 0
-    for line in index_text:gmatch("[^\n]+") do
-        local name, offset, length = line:match("^(.-)|(%d+)|(%d+)$")
-        if name and offset and length then
-            local bytes = payload:sub(tonumber(offset) + 1, tonumber(offset) + tonumber(length))
-            local out = io.open(dir .. "/" .. name, "wb")
-            if out then
-                out:write(bytes)
-                out:close()
-                count = count + 1
-            end
-        end
-    end
-    return true, nil, count
-end
-
-local function syncContainerFile(path, keep_local, silent)
-    if not Sync.isConfigured() then return nil, "no cloud server configured" end
-    local server = Sync.getSettings().sync_server
-    local ok = false
-    local perr = pcall(function()
-        SyncService.sync(server, path, function(local_path, cached_path, income_path)
-            if not keep_local then
-                local income = io.open(income_path, "rb")
-                if income then
-                    local data = income:read("*a")
-                    income:close()
-                    if data and #data > 0 then
-                        local out = io.open(local_path, "wb")
-                        if out then out:write(data) out:close() end
-                    end
-                end
-            end
-            ok = true
-            return true
-        end, silent)
-    end)
-    if not perr then return nil, "sync error" end
-    return ok
-end
-
--- Backup the cover cache (annotations cloud channel server is used).
-function Sync.backupCovers(silent)
-    local dir = covers_dir()
-    if lfs.attributes(dir, "mode") ~= "directory" then
-        return nil, "no covers dir yet"
-    end
-    local tmp = dir .. "/" .. COVERS_FILE .. ".tmp"
-    local ok_pack, msg = pack_covers_into(tmp)
-    if not ok_pack then return nil, msg end
-    local target = dir .. "/" .. COVERS_FILE
-    pcall(os.rename, tmp, target)
-    local ok_sync = syncContainerFile(target, true, silent)
-    if not ok_sync then return nil, "backup upload failed" end
-    return true
-end
-
--- Restore the cover cache from the cloud (overwrites local covers).
-function Sync.restoreCovers(silent)
-    local dir = covers_dir()
-    if lfs.attributes(dir, "mode") ~= "directory" then
-        lfs.mkdir(dir)
-    end
-    local target = dir .. "/" .. COVERS_FILE
-    local f = io.open(target, "wb")
-    if f then f:write("KDCOVER1\n\n") f:close() end
-    local ok_sync = syncContainerFile(target, false, silent)
-    if not ok_sync then return nil, "restore download failed" end
-    local ok_unpack, msg, count = unpack_covers_from(target)
-    if not ok_unpack then return nil, msg end
-    os.remove(target)
-    return true, count
-end
-
--- Single-shot cover job through the shared job state (web polls it).
-function Sync.startCoverJob(kind)
-    if Sync.isBusy() then return false end
-    local j = Sync.job
-    j.id = j.id + 1
-    j.running = true
-    j.kind = kind -- "covers-backup" | "covers-restore"
-    j.total = 1
-    j.done = 0
-    j.ok = 0
-    j.skipped = 0
-    j.failed = 0
-    j.current = ""
-    j.errors = {}
-    j.started_at = os.time()
-    j.finished_at = nil
-    UIManager:scheduleIn(0.01, function()
-        local fn = kind == "covers-restore" and Sync.restoreCovers or Sync.backupCovers
-        local ok, msg = fn(true)
-        j.done = 1
-        j.finished_at = os.time()
-        j.running = false
-        if ok then
-            j.ok = 1
-        else
-            j.failed = 1
-            j.errors = { msg or "cover sync failed" }
-        end
-    end)
-    return true
-end
-
-return Sync.available() and s.is_enabled and type(s.sync_server) == "table"
+    return Sync.available() and s.is_enabled and type(s.sync_server) == "table"
 end
 
 function Sync.getProgressSettings()
@@ -313,14 +143,14 @@ end
 
 local function read_json_array(path)
     local f = io.open(path, "rb")
-    if not f then return nil end
+    if not f then return nil, false end -- missing file is normal
     local content = f:read("*all")
     f:close()
-    if not content or content == "" then return nil end
+    if not content or content == "" then return nil, true end
     local ok, data = pcall(rapidjson.decode, content)
-    if not ok or type(data) ~= "table" then return nil end
+    if not ok or type(data) ~= "table" then return nil, true end -- corrupt
     destringify_ext_keys(data)
-    return data
+    return data, false
 end
 
 local function write_json_array(path, annotations)
@@ -494,33 +324,35 @@ local function write_annotations_hash(ds, merged, doc_path)
     end
     ds.data.annotations = result
 
-    -- The exact file DocSettings:flush() will overwrite first: mirror its
-    -- preferred-location resolution ("doc" = sidecar next to the book).
+    -- Locate the ACTUAL metadata file KOReader would read/write (may live in
+    -- the docsettings dir for migrated/read-only books), backup it to .bak,
+    -- flush via DocSettings, and remove the backup only after success.
     local meta = nil
-    local pref = G_reader_settings:readSetting("document_metadata_folder", "doc") or "doc"
-    local target_dir
-    if pref == "dir" then
-        target_dir = ds.dir_sidecar_dir
-    elseif pref == "hash" then
-        target_dir = ds.hash_sidecar_dir
-    else
-        target_dir = ds.doc_sidecar_dir
+    if type(ds.findSidecarFile) == "function" then
+        local okf, fpath = pcall(ds.findSidecarFile, ds, doc_path)
+        if okf and type(fpath) == "string" then meta = fpath end
     end
-    if not target_dir then target_dir = ds.doc_sidecar_dir end
-    if target_dir then
-        meta = target_dir .. "/" .. (ds.sidecar_filename or "metadata.lua")
+    if not meta then
+        -- fallback: first existing metadata.*.lua in the sidecar dirs
+        for _, dir in ipairs({ ds.doc_sidecar_dir, ds.dir_sidecar_dir, ds.hash_sidecar_dir }) do
+            local f = dir and metadata_file_in(dir) or nil
+            if f then meta = f break end
+        end
     end
+    local bak = meta and (meta .. ".bak") or nil
     if meta and lfs.attributes(meta, "mode") == "file" then
-        pcall(os.rename, meta, meta .. ".bak")
+        pcall(os.remove, bak) -- clear stale backup so rename cannot fail
+        pcall(os.rename, meta, bak)
     end
     local written_dir = ds:flush()
     if not written_dir then
         logger.err("KoCloud: failed to flush merged annotations")
-        if meta and lfs.attributes(meta .. ".bak", "mode") == "file" then
-            pcall(os.rename, meta .. ".bak", meta)
+        if bak and lfs.attributes(bak, "mode") == "file" then
+            pcall(os.rename, bak, meta)
         end
         return false
     end
+    -- success: keep one rolling .bak (last good copy, replaced next sync)
     logger.info("KoCloud: merged annotations saved to",
         written_dir .. "/" .. (ds.sidecar_filename or "metadata.lua"))
     return true
@@ -572,7 +404,16 @@ function Sync.syncBook(doc_path, live_annotations, opts)
         return nil, "cannot create sidecar dir"
     end
     local dir_name = sidecar_dir:match("([^/]+)/*$") or "annotations"
-    local carrier = sidecar_dir .. "/" .. dir_name:gsub("[^%w%.%-%_]", "_") .. ".json"
+    -- Remote filename must stay unique across devices: two books in different
+    -- folders with the same sidecar dir name would otherwise collide (SyncService
+    -- names the remote file after the local basename). Hash the dir into the name.
+    local dir_hash = ""
+    do
+        local h = 0
+        for i = 1, #sidecar_dir do h = (h * 131 + sidecar_dir:byte(i)) % 4294967296 end
+        dir_hash = string.format("-%08x", h)
+    end
+    local carrier = sidecar_dir .. "/" .. dir_name:gsub("[^%w%.%-%_]", "_") .. dir_hash .. ".json"
     if not write_json_array(carrier, local_list) then
         if ds then pcall(function() ds:close() end) end
         return nil, "cannot write sync file"
@@ -581,10 +422,19 @@ function Sync.syncBook(doc_path, live_annotations, opts)
     local ok_sync = false
     local ok, err = pcall(function()
         SyncService.sync(server, carrier, function(local_path, cached_path, income_path)
-            local local_carrier = read_json_array(local_path) or {}
-            local cached = read_json_array(cached_path) or {}
-            local incoming = read_json_array(income_path) or {}
-            local merged = Sync.mergeAnnotations(local_carrier, incoming, cached)
+            local local_carrier, c1 = read_json_array(local_path)
+            local cached, c2 = read_json_array(cached_path)
+            local incoming, c3 = read_json_array(income_path)
+            if c1 or c2 or c3 then
+                -- corrupt carrier: never treat as empty (would look like a
+                -- full local/remote deletion and clear the shared state)
+                logger.warn("KoCloud: corrupt sync carrier, skipping book")
+                return false
+            end
+            local local_list = local_carrier or {}
+            cached = cached or {}
+            incoming = incoming or {}
+            local merged = Sync.mergeAnnotations(local_list, incoming, cached)
             write_json_array(local_path, merged) -- keep the carrier current
             if opts.apply_live then
                 ok_sync = opts.apply_live(merged) or false
@@ -697,7 +547,13 @@ function Sync.syncBookProgress(doc_path, opts)
         return nil, "cannot create sidecar dir"
     end
     local dir_name = sidecar_dir:match("([^/]+)/*$") or "annotations"
-    local carrier = sidecar_dir .. "/" .. dir_name:gsub("[^%w%.%-%_]", "_") .. ".progress.json"
+    local dir_hash = ""
+    do
+        local h = 0
+        for i = 1, #sidecar_dir do h = (h * 131 + sidecar_dir:byte(i)) % 4294967296 end
+        dir_hash = string.format("-%08x", h)
+    end
+    local carrier = sidecar_dir .. "/" .. dir_name:gsub("[^%w%.%-%_]", "_") .. dir_hash .. ".progress.json"
     if type(opts.live_xp) == "string" then
         local live = progress_payload(ds)
         live.xp = opts.live_xp
@@ -718,12 +574,18 @@ function Sync.syncBookProgress(doc_path, opts)
     local perr = pcall(function()
         SyncService.sync(server, carrier, function(local_path, cached_path, income_path)
             local function read_payload(fpath)
-                local arr = read_json_array(fpath)
-                return arr and arr[1] or nil
+                local arr, corrupt = read_json_array(fpath)
+                if corrupt then return nil, true end
+                return arr and arr[1] or nil, false
             end
-            local local_p = read_payload(local_path)
-            local cached_p = read_payload(cached_path)
-            local server_p = read_payload(income_path) or cached_p
+            local local_p, c1 = read_payload(local_path)
+            local cached_p, c2 = read_payload(cached_path)
+            local server_p, c3 = read_payload(income_path)
+            if c1 or c2 or c3 then
+                logger.warn("KoCloud: corrupt progress carrier, skipping book")
+                return false
+            end
+            if not server_p then server_p = cached_p end
             local chosen = merge_progress(local_p, server_p, cached_p, p.conflict or "later")
             if chosen and chosen ~= local_p then
                 write_json_array(local_path, { chosen })
@@ -752,6 +614,7 @@ end
 Sync.job = {
     id = 0,
     running = false,
+    cancelled = false,
     kind = nil,
     total = 0,
     done = 0,
@@ -766,6 +629,18 @@ Sync.job = {
 
 function Sync.isBusy()
     return Sync.job.running
+end
+
+-- Ask a running job to stop at the next book boundary (called on suspend /
+-- widget close so a background sync cannot keep waking the UI).
+function Sync.cancelJob()
+    Sync.job.cancelled = true
+    Sync.job.running = false
+    Sync.job.finished_at = os.time()
+end
+
+function Sync.isCancelled()
+    return Sync.job.cancelled
 end
 
 function Sync.jobStatus()
@@ -815,6 +690,7 @@ function Sync.startJob(channel, silent)
     local j = Sync.job
     j.id = j.id + 1
     j.running = true
+    j.cancelled = false
     j.kind = channel
     j.total = #books
     j.done = 0
@@ -830,6 +706,12 @@ function Sync.startJob(channel, silent)
     local i = 0
     local step
     step = function()
+        if j.cancelled then
+            j.running = false
+            j.current = ""
+            j.finished_at = j.finished_at or os.time()
+            return
+        end
         i = i + 1
         if i > #books then
             j.running = false
@@ -839,8 +721,13 @@ function Sync.startJob(channel, silent)
         end
         local book = books[i]
         j.current = book.title or ""
-        local ok, err = fn(book.file, nil, { silent = true })
-        if ok then
+        local okp, ok, err = pcall(fn, book.file, nil, { silent = true })
+        if not okp then
+            j.failed = j.failed + 1
+            if #j.errors < 5 then
+                table.insert(j.errors, (book.title or "?") .. ": " .. tostring(err))
+            end
+        elseif ok then
             j.ok = j.ok + 1
         elseif err == "no annotations" or err == "book file not found" then
             j.skipped = j.skipped + 1
@@ -851,9 +738,189 @@ function Sync.startJob(channel, silent)
             end
         end
         j.done = j.done + 1
-        UIManager:scheduleIn(0.01, step)
+        if not j.cancelled then
+            UIManager:scheduleIn(0.01, step)
+        end
     end
     UIManager:scheduleIn(0.01, step)
+    return true
+end
+
+
+
+-- Cover cache backup / restore
+-------------------------------------------------------------------------------
+-- Covers are a regenerable cache: all files under the covers dir are packed
+-- into ONE self-describing container ("name|offset|length" index + raw bytes,
+-- no compression) and pushed through SyncService.sync. Backup keeps the local
+-- container as source of truth; restore pulls the remote one and unpacks it
+-- over the local covers dir.
+local DataStorage = require("datastorage")
+
+local COVERS_FILE = "kodashboard-covers.bin"
+
+local function covers_dir()
+    return (DataStorage:getDataDir() or ".") .. "/kodashboard/covers"
+end
+
+local function pack_covers_into(path)
+    local dir = covers_dir()
+    if lfs.attributes(dir, "mode") ~= "directory" then return false, "no covers dir" end
+    local entries = {}
+    for entry in lfs.dir(dir) do
+        local fpath = dir .. "/" .. entry
+        if entry ~= "." and entry ~= ".." and lfs.attributes(fpath, "mode") == "file" then
+            entries[#entries + 1] = { name = entry, path = fpath }
+        end
+    end
+    if #entries == 0 then return false, "no covers to backup" end
+    table.sort(entries, function(a, b) return a.name < b.name end)
+    local index = {}
+    local offset = 0
+    for _, e in ipairs(entries) do
+        index[#index + 1] = string.format("%s|%d|%d", e.name, offset, lfs.attributes(e.path, "size") or 0)
+        offset = offset + (lfs.attributes(e.path, "size") or 0)
+    end
+    local out = io.open(path, "wb")
+    if not out then return false, "cannot write cover pack" end
+    out:write("KDCOVER1\n")
+    out:write(table.concat(index, "\n") .. "\n\n")
+    for _, e in ipairs(entries) do
+        local f = io.open(e.path, "rb")
+        if f then
+            out:write(f:read("*a"))
+            f:close()
+        end
+    end
+    out:close()
+    return true, nil, #entries
+end
+
+local function unpack_covers_from(path)
+    local f = io.open(path, "rb")
+    if not f then return false, "cover pack not found" end
+    local content = f:read("*a")
+    f:close()
+    local magic, rest = content:match("^KDCOVER1\n(.*)$")
+    if not magic then return false, "invalid cover pack" end
+    local index_text, payload = rest:match("^(.-)\n\n(.*)$")
+    if not index_text then return false, "invalid cover pack" end
+    local dir = covers_dir()
+    if lfs.attributes(dir, "mode") ~= "directory" then
+        if not lfs.mkdir(dir) and lfs.attributes(dir, "mode") ~= "directory" then
+            return false, "cannot create covers dir"
+        end
+    end
+    local count = 0
+    for line in index_text:gmatch("[^\n]+") do
+        local name, offset, length = line:match("^(.-)|(%d+)|(%d+)$")
+        if name and offset and length then
+            -- reject path separators / traversal and out-of-bounds ranges
+            local safe_name = name:match("^([^/\\]+)$")
+            local off, len = tonumber(offset), tonumber(length)
+            if safe_name and safe_name ~= "." and safe_name ~= ".."
+                and off and len and off >= 0 and len >= 0 and off + len <= #payload then
+                local bytes = payload:sub(off + 1, off + len)
+                local out = io.open(dir .. "/" .. safe_name, "wb")
+                if out then
+                    out:write(bytes)
+                    out:close()
+                    count = count + 1
+                end
+            end
+        end
+    end
+    return true, nil, count
+end
+
+local function syncContainerFile(path, keep_local, silent)
+    if not Sync.isConfigured() then return nil, "no cloud server configured" end
+    local server = Sync.getSettings().sync_server
+    local ok = false
+    local perr = pcall(function()
+        SyncService.sync(server, path, function(local_path, cached_path, income_path)
+            if not keep_local then
+                local income = io.open(income_path, "rb")
+                if income then
+                    local data = income:read("*a")
+                    income:close()
+                    if data and #data > 0 then
+                        local out = io.open(local_path, "wb")
+                        if out then out:write(data) out:close() end
+                    end
+                end
+            end
+            ok = true
+            return true
+        end, silent)
+    end)
+    if not perr then return nil, "sync error" end
+    return ok
+end
+
+-- Backup the cover cache (annotations cloud channel server is used).
+function Sync.backupCovers(silent)
+    local dir = covers_dir()
+    if lfs.attributes(dir, "mode") ~= "directory" then
+        return nil, "no covers dir yet"
+    end
+    local tmp = dir .. "/" .. COVERS_FILE .. ".tmp"
+    local ok_pack, msg = pack_covers_into(tmp)
+    if not ok_pack then return nil, msg end
+    local target = dir .. "/" .. COVERS_FILE
+    pcall(os.rename, tmp, target)
+    local ok_sync = syncContainerFile(target, true, silent)
+    if not ok_sync then return nil, "backup upload failed" end
+    return true
+end
+
+-- Restore the cover cache from the cloud (overwrites local covers).
+function Sync.restoreCovers(silent)
+    local dir = covers_dir()
+    if lfs.attributes(dir, "mode") ~= "directory" then
+        lfs.mkdir(dir)
+    end
+    local target = dir .. "/" .. COVERS_FILE
+    local f = io.open(target, "wb")
+    if f then f:write("KDCOVER1\n\n") f:close() end
+    local ok_sync = syncContainerFile(target, false, silent)
+    if not ok_sync then return nil, "restore download failed" end
+    local ok_unpack, msg, count = unpack_covers_from(target)
+    if not ok_unpack then return nil, msg end
+    os.remove(target)
+    return true, count
+end
+
+-- Single-shot cover job through the shared job state (web polls it).
+function Sync.startCoverJob(kind)
+    if Sync.isBusy() then return false end
+    local j = Sync.job
+    j.id = j.id + 1
+    j.running = true
+    j.cancelled = false
+    j.kind = kind -- "covers-backup" | "covers-restore"
+    j.total = 1
+    j.done = 0
+    j.ok = 0
+    j.skipped = 0
+    j.failed = 0
+    j.current = ""
+    j.errors = {}
+    j.started_at = os.time()
+    j.finished_at = nil
+    UIManager:scheduleIn(0.01, function()
+        local fn = kind == "covers-restore" and Sync.restoreCovers or Sync.backupCovers
+        local okp, ok, msg = pcall(fn, true)
+        j.done = 1
+        j.finished_at = os.time()
+        j.running = false
+        if okp and ok then
+            j.ok = 1
+        else
+            j.failed = 1
+            j.errors = { msg or "cover sync failed" }
+        end
+    end)
     return true
 end
 

@@ -149,8 +149,9 @@ end
 -- Shared guard for gesture-triggered syncs.
 function KoCloud:dispatcherSync(channel)
     if not self.document or not self.document.file then return end
-    local configured = channel == "progress"
-        and Sync.isProgressConfigured() or Sync.isConfigured()
+    local configured = (channel == "progress" and Sync.isProgressConfigured())
+        or (channel == "annotations" and Sync.isConfigured())
+        or false
     if not configured then
         local InfoMessage = require("ui/widget/infomessage")
         UIManager:show(InfoMessage:new{
@@ -168,25 +169,37 @@ function KoCloud:isRunning()
 end
 
 function KoCloud:onEnterStandby()
+    Sync.cancelJob()
     if self:isRunning() then self:stop() end
 end
 
 function KoCloud:onSuspend()
+    Sync.cancelJob()
     if self:isRunning() then self:stop() end
 end
 
 function KoCloud:onExit()
+    Sync.cancelJob()
     if self:isRunning() then self:stop() end
 end
 
 function KoCloud:onCloseWidget()
+    Sync.cancelJob()
     if self:isRunning() then self:stop() end
 end
 
 function KoCloud:start()
+    if self:isRunning() then return end
     logger.dbg("KoCloud: Starting server...")
 
     if Device:isKindle() then
+        -- Idempotent: clear any stale rules first, then add fresh ones
+        os.execute(string.format(
+            "iptables -D INPUT -p tcp --dport %s -m conntrack --ctstate NEW,ESTABLISHED -j ACCEPT",
+            self.port))
+        os.execute(string.format(
+            "iptables -D OUTPUT -p tcp --sport %s -m conntrack --ctstate ESTABLISHED -j ACCEPT",
+            self.port))
         os.execute(string.format(
             "iptables -A INPUT -p tcp --dport %s -m conntrack --ctstate NEW,ESTABLISHED -j ACCEPT",
             self.port))
@@ -343,9 +356,16 @@ function KoCloud:addToMainMenu(menu_items)
                                 callback = function()
                                     local new_port = port_dialog:getInputText()
                                     UIManager:close(port_dialog)
-                                    if new_port and new_port ~= "" then
-                                        self.port = new_port
-                                        G_reader_settings:saveSetting("kodashboard_port", new_port)
+                                    local n = tonumber(new_port)
+                                    if n and n >= 1 and n <= 65535 and n == math.floor(n) then
+                                        self.port = tostring(n)
+                                        G_reader_settings:saveSetting("kodashboard_port", self.port)
+                                    else
+                                        local InfoMessage = require("ui/widget/infomessage")
+                                        UIManager:show(InfoMessage:new{
+                                            text = _("Invalid port. Use an integer between 1 and 65535."),
+                                            timeout = 3,
+                                        })
                                     end
                                     if touchmenu_instance then
                                         touchmenu_instance:updateItems()
@@ -693,6 +713,9 @@ function KoCloud:syncCurrentBook(channel, reload)
             if is_reload then
                 kocloud_reloading = true
                 UIManager:tickAfterNext(function() ui:reloadDocument() end)
+                -- self-heal: if the reload never reaches a fresh onReaderReady
+                -- (e.g. file vanished), do not leave the module guard stuck.
+                UIManager:scheduleIn(30, function() kocloud_reloading = false end)
             end
             return true
         end,
@@ -757,11 +780,11 @@ end
 
 function KoCloud:onResume()
     local s = Sync.getSettings()
-    if s.sync_on_resume and Sync.isConfigured() and NetworkMgr:isWifiOn() then
+    if s.sync_on_resume and Sync.isConfigured() and NetworkMgr:isWifiOn() and not Sync.isBusy() then
         UIManager:nextTick(function() self:syncCurrentBook("annotations", true) end)
     end
     local p = Sync.getProgressSettings()
-    if p.auto.resume and Sync.isProgressConfigured() and NetworkMgr:isWifiOn() then
+    if p.auto.resume and Sync.isProgressConfigured() and NetworkMgr:isWifiOn() and not Sync.isBusy() then
         UIManager:nextTick(function() self:syncCurrentBook("progress", true) end)
     end
 end
@@ -836,10 +859,17 @@ function KoCloud:onRequest(data, request_id)
     if method == "POST" then
         local clen = tonumber(headers["content-length"] or "0") or 0
         if clen < 0 then clen = 0 end
+        -- Cap declared size so a lying client cannot stall the UI loop reading
+        -- forever or balloon memory. 8 MiB covers the 2 MiB cover upload limit.
+        local MAX_BODY = 8 * 1024 * 1024
+        if clen > MAX_BODY then
+            return self:sendResponse(reqinfo, 413, CTYPE.TEXT, "Body too large")
+        end
         if #reqinfo.body < clen and request_id and request_id.receive then
             local remain = clen - #reqinfo.body
             local chunks = { reqinfo.body }
-            while remain > 0 do
+            local deadline = os.time() + 30 -- bail out if the peer stalls
+            while remain > 0 and os.time() < deadline do
                 local part, err, partial = request_id:receive(remain)
                 if part and #part > 0 then
                     table.insert(chunks, part)
@@ -883,16 +913,14 @@ function KoCloud:onRequest(data, request_id)
             local ok_route, payload = xpcall(function()
                 return api.route(path, uri, reqinfo)
             end, function(err)
-                if debug and debug.traceback then
-                    return debug.traceback(tostring(err), 2)
-                end
-                return tostring(err)
+                return tostring(err) -- message only, strip the traceback
             end)
             if not ok_route then
                 logger.err("KoCloud: legacy api.route error:", payload)
+                local short = (tostring(payload):match("[^\n]*") or "internal error"):sub(1, 160)
                 local enc_ok, err_body = pcall(JSON.encode, {
                     error = "internal server error",
-                    detail = tostring(payload),
+                    detail = short,
                 })
                 if enc_ok then
                     return self:sendResponse(reqinfo, 500, CTYPE.JSON, err_body)
@@ -917,11 +945,21 @@ function KoCloud:onRequest(data, request_id)
     if path == "/" then
         path = "/index.html"
     end
-    local plugin_dir = self:getPluginDir()
-    local filepath = plugin_dir .. "/web" .. path
     if method ~= "GET" then
         return self:sendResponse(reqinfo, 405, CTYPE.TEXT, "Method not allowed")
     end
+    -- Reject path traversal / non-rooted paths before touching the filesystem
+    local path_ok = path:sub(1, 1) == "/"
+    if path_ok then
+        for seg in path:gmatch("[^/]+") do
+            if seg == ".." then path_ok = false break end
+        end
+    end
+    if not path_ok then
+        return self:sendResponse(reqinfo, 400, CTYPE.TEXT, "Bad path")
+    end
+    local plugin_dir = self:getPluginDir()
+    local filepath = plugin_dir .. "/web" .. path
     local f = io.open(filepath, "rb")
     if f then
         local content = f:read("*all")

@@ -2423,3 +2423,26 @@ html[data-color-scheme='light'] .calendar-cell {
   overflow-wrap: anywhere;
   word-break: break-word;
 }
+
+
+/* Fallback for browsers without color-mix() support (older WebViews): the
+   heat/calendar intensity rules drop out entirely there, so give them a
+   plain rgba stand-in. Modern browsers ignore this whole block. */
+@supports not (color-mix(in srgb, red, blue)) {
+  .book-heat-cell.active {
+    border-color: rgba(0, 144, 135, 0.6);
+    background: rgba(0, 144, 135, calc(var(--heat, 0) * 0.6 + 0.06));
+  }
+  .book-heat-cell.annotation-only {
+    border-color: rgba(0, 144, 135, 0.45);
+    background: rgba(0, 144, 135, 0.18);
+  }
+  .book-heat-cell.today {
+    box-shadow: inset 0 0 0 1px rgba(0, 144, 135, 0.5);
+  }
+  .calendar-cell {
+    background: linear-gradient(180deg,
+      rgba(0, 144, 135, calc(var(--heat, 0) * 0.75 + 0.12)),
+      rgba(35, 186, 175, calc(var(--heat, 0) * 0.3 + 0.05)));
+  }
+}

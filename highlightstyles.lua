@@ -147,6 +147,7 @@ local custom_drawers = {
 }
 
 ReaderView.drawHighlightRect = function(self, bb, _x, _y, rect, drawer, color, draw_note_mark)
+    if not orig_drawHighlightRect then return end -- baseline drifted; do no harm
     -- Stock "Underline" style: apply the user's custom thickness too.
     if drawer == "underscore" and LINE_THICKNESS.underline then
         local orig_thick = Size.line.medium

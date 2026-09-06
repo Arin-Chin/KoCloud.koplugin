@@ -59,7 +59,8 @@ normalize_search_query = function(s)
     s = s:gsub("%b()", " ")
     s = s:gsub("%b[]", " ")
     s = s:gsub("%b{}", " ")
-    s = s:gsub("[|｜].*$", " ")
+    s = s:gsub("|.*$", " ")
+    s = s:gsub("\239\189\156.*$", " ") -- ｜ full-width pipe then truncate
     s = s:gsub("%f[%a]novel chapters?%f[%A].*$", " ")
     s = s:gsub("%f[%a]light novel pub%f[%A].*$", " ")
     s = s:gsub("%f[%a]z%-library%f[%A].*$", " ")
@@ -162,6 +163,9 @@ local function http_get(url)
         socketutil:reset_timeout()
     end
     local body = table.concat(chunks)
+    if #body > (6 * 1024 * 1024) then
+        return nil, "response too large", headers, tonumber(code) or 0
+    end
     local status_code = tonumber(code) or 0
     if status_code < 200 or status_code >= 300 then
         local err = status or ("HTTP " .. tostring(status_code))
@@ -428,8 +432,11 @@ local function save_uploaded_cover(book_ref, body, header_ctype)
     end
 
     local sniffed_ctype = detect_image_ctype_from_body(body)
-    local declared_ctype = normalize_image_ctype(header_ctype)
-    local ctype = sniffed_ctype or declared_ctype
+    -- Trust only sniffed magic bytes, never the client-declared Content-Type.
+    if not sniffed_ctype then
+        return { ok = false, error = "Unsupported image format" }, 415
+    end
+    local ctype = sniffed_ctype
     if ctype ~= CTYPE.JPEG and ctype ~= CTYPE.PNG and ctype ~= CTYPE.WEBP then
         return { ok = false, error = "Unsupported image format" }, 415
     end
@@ -448,7 +455,7 @@ local function save_uploaded_cover(book_ref, body, header_ctype)
     local path = string.format("%s/%s%s", cover_dir, tostring(cover_key), ext)
     local f = io.open(path, "wb")
     if not f then
-        return { ok = false, error = "Unable to save cover", path = path }, 500
+        return { ok = false, error = "Unable to save cover" }, 500
     end
     f:write(body)
     f:close()
@@ -460,7 +467,6 @@ local function save_uploaded_cover(book_ref, body, header_ctype)
         saved = true,
         md5 = book.md5,
         cover_cache_key = cover_key,
-        path = path,
         content_type = ctype,
         source = "upload",
     }, 200
@@ -495,8 +501,12 @@ function Api.handleRequest(server, reqinfo, path, full_uri)
         return Api.sendBookCover(server, reqinfo, cover_book_ref)
     end
 
-    -- Cloud sync control (device-side execution, web is a remote control)
+    -- Cloud sync control (device-side execution, web is a remote control).
+    -- All mutation endpoints require POST (GET is reserved for status reads).
     if path == "/api/cloud/annotations/sync" then
+        if reqinfo.method ~= "POST" then
+            return server:sendResponse(reqinfo, 405, CTYPE.JSON, '{"ok":false,"error":"Only POST supported"}')
+        end
         if Sync.isBusy() then
             return server:sendResponse(reqinfo, 200, CTYPE.JSON, '{"ok":false,"busy":true,"error":"sync already running"}')
         end
@@ -509,6 +519,9 @@ function Api.handleRequest(server, reqinfo, path, full_uri)
     end
 
     if path == "/api/cloud/progress/sync" then
+        if reqinfo.method ~= "POST" then
+            return server:sendResponse(reqinfo, 405, CTYPE.JSON, '{"ok":false,"error":"Only POST supported"}')
+        end
         if Sync.isBusy() then
             return server:sendResponse(reqinfo, 200, CTYPE.JSON, '{"ok":false,"busy":true,"error":"sync already running"}')
         end
@@ -517,6 +530,9 @@ function Api.handleRequest(server, reqinfo, path, full_uri)
     end
 
     if path == "/api/cloud/covers/backup" or path == "/api/cloud/covers/restore" then
+        if reqinfo.method ~= "POST" then
+            return server:sendResponse(reqinfo, 405, CTYPE.JSON, '{"ok":false,"error":"Only POST supported"}')
+        end
         if Sync.isBusy() then
             return server:sendResponse(reqinfo, 200, CTYPE.JSON, '{"ok":false,"busy":true,"error":"sync already running"}')
         end
@@ -545,17 +561,15 @@ function Api.handleRequest(server, reqinfo, path, full_uri)
     local ok, result = xpcall(function()
         return Api.route(path, full_uri, reqinfo)
     end, function(err)
-        if debug and debug.traceback then
-            return debug.traceback(tostring(err), 2)
-        end
-        return tostring(err)
+        return tostring(err) -- keep only the message; strip the traceback
     end)
 
     if not ok then
         logger.err("KoCloud API error:", result)
+        local short = (tostring(result):match("[^\n]*") or "internal error"):sub(1, 160)
         local enc_ok, err_body = pcall(JSON.encode, {
             error = "internal server error",
-            detail = tostring(result),
+            detail = short,
         })
         if enc_ok then
             return server:sendResponse(reqinfo, 500, CTYPE.JSON, err_body)
@@ -794,6 +808,16 @@ function Api.fetchBookCover(book_ref)
     end
 
     local cover_body, ctype, _, fetched_url, cover_err = download_openlibrary_cover(cover_id)
+    if cover_body then
+        -- Only persist real images: sniff magic bytes, never trust headers.
+        local sniffed = detect_image_ctype_from_body(cover_body)
+        if not sniffed then
+            cover_body = nil
+            cover_err = (cover_err or "") .. (cover_err and " / " or "") .. "not an image"
+        else
+            ctype = sniffed
+        end
+    end
     if not cover_body then
         local embedded, emb_err = extract_local_cover_to_cache(book)
         if embedded then
@@ -833,7 +857,7 @@ function Api.fetchBookCover(book_ref)
     local path = string.format("%s/%s%s", cover_dir, tostring(cover_key), ext)
     local f = io.open(path, "wb")
     if not f then
-        return { ok = false, error = "Unable to save cover", md5 = book.md5, path = path }
+        return { ok = false, error = "Unable to save cover", md5 = book.md5 }
     end
     f:write(cover_body)
     f:close()
@@ -844,7 +868,6 @@ function Api.fetchBookCover(book_ref)
         md5 = book.md5,
         cover_cache_key = cover_key,
         cover_id = cover_id,
-        path = path,
         query = query,
         used_query = used_query,
         content_type = image_ctype_from_ext(ext),

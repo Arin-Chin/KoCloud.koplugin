@@ -10,6 +10,9 @@
    Lua template). Everything runs after each render via a MutationObserver.
    Non-Chinese browsers: ZH is false, t() is a passthrough, and the DOM walk
    never runs — zero behavior change. */
+function lsGet(k) { try { return localStorage.getItem(k); } catch (_) { return null; } }
+function lsSet(k, v) { try { lsSet(k, v); } catch (_) {} }
+
 const ZH = /^zh/i.test(navigator.language || '');
 const UI_LOCALE = ZH ? 'zh-CN' : 'en-US';
 
@@ -54,6 +57,9 @@ const I18N = {
   'Activity': '同步动态',
   'Last sync': '上次同步',
   'Cloud sync failed: %1': '云端同步失败：%1',
+  'Exported JSON': '已导出 JSON',
+  'Copied': '已复制',
+  'Copy failed': '复制失败',
   'Backup covers': '备份封面',
   'Restore covers': '恢复封面',
   'covers-backup': '封面备份',
@@ -83,7 +89,6 @@ const I18N = {
   'Search title or author': '搜索书名或作者',
   'All': '全部',
   'Reading': '在读',
-  'Finished': '已读完',
   'With highlights': '有摘录',
   'Sort': '排序',
   'Last open': '最近打开',
@@ -179,7 +184,6 @@ const I18N = {
   'Select a day': '选择一天',
   'Tap a day with reading to inspect top books and duration.': '点击有阅读记录的日子查看书籍与时长详情。',
   'Total reading': '总阅读',
-  'Books': '书籍',
   'No book breakdown available.': '暂无当日书籍明细。',
   'Reading Rhythm': '阅读节奏',
   'Reading history': '阅读历史',
@@ -336,15 +340,15 @@ function installI18n() {
 const state = {
   view: 'books',
   bookId: null,
-  booksMode: localStorage.getItem('kd-mode') || 'grid',
-  booksSortKey: localStorage.getItem('kd-sort-key') || 'last_open_ts',
-  booksSortDir: localStorage.getItem('kd-sort-dir') || 'desc',
+  booksMode: lsGet('kd-mode') || 'grid',
+  booksSortKey: lsGet('kd-sort-key') || 'last_open_ts',
+  booksSortDir: lsGet('kd-sort-dir') || 'desc',
   booksSearch: '',
-  booksFilter: localStorage.getItem('kd-filter') || 'all',
+  booksFilter: lsGet('kd-filter') || 'all',
   highlightsSearch: '',
-  highlightsType: localStorage.getItem('kd-hl-type') || 'all',
-  highlightsSort: localStorage.getItem('kd-hl-sort') || 'recent',
-  statsTrendDays: Number(localStorage.getItem('kd-stats-trend-days') || '90') || 90,
+  highlightsType: lsGet('kd-hl-type') || 'all',
+  highlightsSort: lsGet('kd-hl-sort') || 'recent',
+  statsTrendDays: Number(lsGet('kd-stats-trend-days') || '90') || 90,
   highlightsCollapsed: {},
   coverVersion: 0,
   coverPullJob: null,
@@ -356,13 +360,13 @@ const uiTimers = { booksSearch: null, highlightsSearch: null, annSearch: null };
 let renderToken = 0;
 
 function savePrefs() {
-  localStorage.setItem('kd-mode', state.booksMode);
-  localStorage.setItem('kd-sort-key', state.booksSortKey);
-  localStorage.setItem('kd-sort-dir', state.booksSortDir);
-  localStorage.setItem('kd-filter', state.booksFilter);
-  localStorage.setItem('kd-hl-type', state.highlightsType);
-  localStorage.setItem('kd-hl-sort', state.highlightsSort);
-  localStorage.setItem('kd-stats-trend-days', String(state.statsTrendDays || 90));
+  lsSet('kd-mode', state.booksMode);
+  lsSet('kd-sort-key', state.booksSortKey);
+  lsSet('kd-sort-dir', state.booksSortDir);
+  lsSet('kd-filter', state.booksFilter);
+  lsSet('kd-hl-type', state.highlightsType);
+  lsSet('kd-hl-sort', state.highlightsSort);
+  lsSet('kd-stats-trend-days', String(state.statsTrendDays || 90));
 }
 
 /* ============================================================
@@ -471,11 +475,11 @@ async function getJsquashWebpEncode() {
 /* ============================================================
    Utilities
    ============================================================ */
+const escDiv = document.createElement('div');
 function esc(s) {
   if (s == null) return '';
-  const d = document.createElement('div');
-  d.textContent = String(s);
-  return d.innerHTML;
+  escDiv.textContent = String(s);
+  return escDiv.innerHTML;
 }
 
 function toArray(v) {
@@ -807,12 +811,12 @@ function normalizeTitle(s) {
 function normalizeLooseTitle(s) {
   return String(s || '')
     .toLowerCase()
-    .replace(/z-library|zlibrary|1lib\\.sk|z-lib\\.sk/g, ' ')
-    .replace(/\\([^)]*\\)/g, ' ')
-    .replace(/\\[[^\\]]*\\]/g, ' ')
-    .replace(/[\\u2018\\u2019']/g, '')
-    .replace(/[^\\p{L}\\p{N}]+/gu, ' ')
-    .replace(/\\s+/g, ' ')
+    .replace(/z-library|zlibrary|1lib\.sk|z-lib\.sk/g, ' ')
+    .replace(/\([^)]*\)/g, ' ')
+    .replace(/\[[^\]]*\]/g, ' ')
+    .replace(/[\u2018\u2019']/g, '')
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .replace(/\s+/g, ' ')
     .trim();
 }
 
@@ -1216,20 +1220,10 @@ const overlay = document.getElementById('overlay');
 const html = document.documentElement;
 
 function setupChrome() {
-  document.getElementById('menu-btn')?.addEventListener('click', () => {
-    sidebar.classList.toggle('open');
-    overlay.classList.toggle('visible');
-  });
-  overlay?.addEventListener('click', () => {
-    sidebar.classList.remove('open');
-    overlay.classList.remove('visible');
-  });
-
-  const savedScheme = localStorage.getItem('kd-theme');
+  const savedScheme = lsGet('kd-theme');
   html.setAttribute('data-color-scheme', savedScheme === 'light' || savedScheme === 'dark' ? savedScheme : 'light');
 
   document.querySelectorAll('.nav-link').forEach((link) => {
-    link.innerHTML = link.innerHTML; // noop keeps markup but normalizes
     link.addEventListener('click', (e) => {
       e.preventDefault();
       navigate(link.dataset.view);
@@ -1258,7 +1252,7 @@ function setupChrome() {
     themeBtn.addEventListener('click', () => {
       const next = html.getAttribute('data-color-scheme') === 'dark' ? 'light' : 'dark';
       html.setAttribute('data-color-scheme', next);
-      localStorage.setItem('kd-theme', next);
+      lsSet('kd-theme', next);
       applyThemeBtn();
       recolorCovers(); // recolor generated covers in place, no re-render
     });
@@ -1293,6 +1287,7 @@ function setupChrome() {
 
 function navigate(view, params = {}) {
   hideTooltip();
+  clearCloudPoll(); // leave the cloud page stops any running activity poll
   state.view = view;
   Object.assign(state, params);
   updateActiveNav();
@@ -1505,6 +1500,7 @@ async function render() {
    Books page
    ============================================================ */
 async function renderBooks() {
+  const bookToken = renderToken;
   const [dash, booksResp, statsResp] = await Promise.all([
     getDashboard(),
     api('books'),
@@ -1551,6 +1547,7 @@ async function renderBooks() {
     { label: 'Reading Time', value: formatDuration(s.total_read_time_sec), sub: 'all time', icon: 'clock' },
     { label: 'Annotations', value: fmtNumber((s.total_highlights || 0) + (s.total_notes || 0)), sub: t('%1 highlights · %2 notes', fmtNumber(s.total_highlights || 0), fmtNumber(s.total_notes || 0)), icon: 'highlight' },
   ];
+  if (bookToken !== renderToken) return; // stale: a newer navigation happened
 
   $content.innerHTML = `
     <div class="view-fade">
@@ -1658,6 +1655,7 @@ function bindBooksEvents() {
     renderBooks();
   });
   document.getElementById('pullCoversBtn')?.addEventListener('click', async () => {
+    if (state.coverPullJob && state.coverPullJob.running) return; // one pull at a time
     const booksResp = await api('books');
     const allBooks = dedupeBooksForDisplay(toArray(booksResp.books));
     if (!allBooks.length) return;
@@ -1746,7 +1744,7 @@ function buildBooksGrid(books, statsIndexes, statsBooks) {
         const pagesRead = b.pages ? Math.round((b.percent / 100) * b.pages) : 0;
         const tag = getBookStatusTag(b);
         return `
-          <article class="book-card panel-subtle ${isMobile ? 'compact-mobile' : ''}" data-book-id="${b.id}" data-search-text="${esc(`${b.title || ''} ${b.authors || ''}`.toLowerCase())}">
+          <article class="book-card panel-subtle ${isMobile ? 'compact-mobile' : ''}" data-book-id="${esc(b.id)}" data-search-text="${esc(`${b.title || ''} ${b.authors || ''}`.toLowerCase())}">
             <div class="book-card-cover-wrap">${renderBookCover(b, { variant: isMobile ? 'thumb' : 'grid' })}</div>
             <div class="book-card-body">
               <div class="book-card-topline">
@@ -1776,7 +1774,7 @@ function buildBooksTable(books, statsIndexes, statsBooks) {
     const tag = getBookStatusTag(b);
     const pagesRead = b.pages ? Math.round((b.percent / 100) * b.pages) : 0;
     return `
-      <tr data-book-id="${b.id}" data-search-text="${esc(`${b.title || ''} ${b.authors || ''}`.toLowerCase())}">
+      <tr data-book-id="${esc(b.id)}" data-search-text="${esc(`${b.title || ''} ${b.authors || ''}`.toLowerCase())}">
         <td class="book-cell">
           <div class="book-row-cover">${renderBookCover(b, { variant: 'thumb' })}</div>
           <div>
@@ -1810,6 +1808,7 @@ function buildBooksTable(books, statsIndexes, statsBooks) {
    Stats page
    ============================================================ */
 async function renderStats() {
+  const statsToken = renderToken;
   const [dash, booksResp] = await Promise.all([
     getDashboard(),
     api('books').catch(() => ({ books: [] })),
@@ -1835,7 +1834,7 @@ async function renderStats() {
   const coverResolver = buildLibraryCoverResolver(allBooks);
   const topByTime = getTopBooksByDays(dash.top_books || {}, 'time', trendDays).map(coverResolver);
   const topByPages = getTopBooksByDays(dash.top_books || {}, 'pages', trendDays).map(coverResolver);
-
+  if (statsToken !== renderToken) return; // stale render
   $content.innerHTML = `
     <div class="view-fade stats-view">
       <section class="hero-shell compact">
@@ -2035,7 +2034,7 @@ function getTopBooksByDays(topBooks = {}, kind = 'time', days = 90) {
   const suffix = days === 30 ? '30d' : days === 180 ? '180d' : days === 365 ? '365d' : '90d';
   const key = kind === 'pages' ? `by_pages_${suffix}` : `by_time_${suffix}`;
   const fallbackKey = kind === 'pages' ? 'by_pages' : 'by_time';
-  const rows = Array.isArray(topBooks[key]) ? topBooks[key] : [];
+  const rows = toArray(topBooks[key]);
   return rows.length ? rows : (Array.isArray(topBooks[fallbackKey]) ? topBooks[fallbackKey] : []);
 }
 
@@ -2198,6 +2197,7 @@ function buildTopBooksList(items, metricKey) {
    Calendar page
    ============================================================ */
 async function renderCalendar() {
+  const calToken = renderToken;
   const [dash, booksResp] = await Promise.all([
     getDashboard(),
     api('books').catch(() => ({ books: [] })),
@@ -2214,6 +2214,7 @@ async function renderCalendar() {
       top_books: toArray(d.top_books).map(coverResolver),
     };
   }
+  if (calToken !== renderToken) return; // stale render
   renderCalendarView(dash, dayMap, coverResolver);
 }
 
@@ -2541,7 +2542,7 @@ function updateCloudActivityUI(act) {
   setText('cloudOk', fmtNumber(act.ok || 0));
   setText('cloudSkip', fmtNumber(act.skipped || 0));
   setText('cloudFail', fmtNumber(act.failed || 0));
-  setText('cloudCurrent', esc(act.current || ''));
+  setText('cloudCurrent', act.current || '');
   setText('cloudState', act.running ? t('Running') : t('Finished'));
   const fill = document.getElementById('cloudBarFill');
   if (fill) {
@@ -2562,6 +2563,7 @@ function pollCloudActivity() {
     const act = await apiNoCache('cloud/activity').catch(() => null);
     if (!act) return;
     updateCloudActivityUI(act);
+    if (!act.running) clearCloudPoll(); // stop once the job is done
   }, 1200);
 }
 
@@ -2583,28 +2585,34 @@ async function startCloudSync() {
 }
 
 async function startCloudCover(kind) {
-  const path = kind === 'restore' ? 'cloud/covers/restore' : 'cloud/covers/backup';
+  const btn = kind === 'restore' ? document.getElementById('cloudRestoreBtn') : document.getElementById('cloudBackupBtn');
+  if (btn) btn.disabled = true;
   try {
-    await apiNoCachePost(path);
+    await apiNoCachePost(kind === 'restore' ? 'cloud/covers/restore' : 'cloud/covers/backup');
     renderCloud();
     pollCloudActivity();
   } catch (e) {
+    if (btn) btn.disabled = false;
     window.alert(t('Cloud sync failed: %1', e && e.message ? e.message : String(e)));
   }
 }
 
 async function startCloudProgress() {
+  const btn = document.getElementById('cloudProgressBtn');
+  if (btn) btn.disabled = true;
   try {
     await apiNoCachePost('cloud/progress/sync');
     renderCloud();
     pollCloudActivity();
   } catch (e) {
+    if (btn) btn.disabled = false;
     window.alert(t('Cloud sync failed: %1', e && e.message ? e.message : String(e)));
   }
 }
 
 async function renderCloud() {
   clearCloudPoll();
+  const cloudToken = renderToken;
   const status = await apiNoCache('cloud/status').catch(() => null);
   const act = await apiNoCache('cloud/activity').catch(() => ({}));
 
@@ -2696,6 +2704,7 @@ async function renderCloud() {
       </section>
     </div>`;
 
+  if (cloudToken !== renderToken) return; // stale render (still poll if started)
   document.getElementById('cloudSyncBtn')?.addEventListener('click', startCloudSync);
   document.getElementById('cloudBackupBtn')?.addEventListener('click', () => startCloudCover('backup'));
   document.getElementById('cloudRestoreBtn')?.addEventListener('click', () => startCloudCover('restore'));
@@ -2714,6 +2723,7 @@ function formatSyncTime(epochSec) {
    Book detail page
    ============================================================ */
 async function renderBook() {
+  const bookToken = renderToken;
   const currentBookRef = getBookRef(state.bookId);
   const [book, annResp, statsResp, timelineResp] = await Promise.all([
     api(`books/${encBookRef(currentBookRef)}`),
@@ -2727,9 +2737,9 @@ async function renderBook() {
     return;
   }
 
-  const annotations = dedupeAnnotationsForDisplay(Array.isArray(annResp?.annotations) ? annResp.annotations : []);
-  const timeline = Array.isArray(timelineResp?.sessions) ? timelineResp.sessions : [];
-  const timelineDaily = Array.isArray(timelineResp?.daily) ? timelineResp.daily : [];
+  const annotations = dedupeAnnotationsForDisplay(toArray(annResp && annResp.annotations));
+  const timeline = toArray(timelineResp && timelineResp.sessions);
+  const timelineDaily = toArray(timelineResp && timelineResp.daily);
   const statsBooks = toArray(statsResp.books);
   const statsIndexes = buildStatsIndexes(statsBooks);
   book.cover_url = bookCoverUrl(currentBookRef);
@@ -2737,7 +2747,7 @@ async function renderBook() {
   const pagesRead = book.pages ? Math.round((book.percent / 100) * book.pages) : 0;
   const pct = Math.round(book.percent || 0);
   const statusTag = getBookStatusTag(book);
-
+  if (bookToken !== renderToken) return; // stale render
   $content.innerHTML = `
     <div class="view-fade">
       <button class="ghost-btn back-btn" id="backBtn">${icon('back', 14)} Back to library</button>
@@ -2900,8 +2910,9 @@ function buildBookMilestones({ sessions = [], annotations = [], totalSessions = 
    Highlights page
    ============================================================ */
 async function renderHighlights() {
+  const hlToken = renderToken;
   const data = await api('highlights');
-  const highlights = dedupeAnnotationsForDisplay(Array.isArray(data?.highlights) ? data.highlights : (Array.isArray(data) ? data : []));
+  const highlights = dedupeAnnotationsForDisplay(toArray(data && data.highlights).length ? toArray(data.highlights) : toArray(data));
   const q = (state.highlightsSearch || '').trim().toLowerCase();
   const typeFilter = state.highlightsType || 'all';
   const sortMode = state.highlightsSort || 'recent';
@@ -2946,6 +2957,7 @@ async function renderHighlights() {
     return (b.lastTs - a.lastTs) || (b.items.length - a.items.length);
   });
 
+  if (hlToken !== renderToken) return; // stale render
   $content.innerHTML = `
     <div class="view-fade">
       <section class="panel highlights-panel">
@@ -2982,8 +2994,8 @@ async function renderHighlights() {
 
         <div id="hlList" class="highlight-groups">
           ${groupsList.length ? groupsList.map((g) => `
-            <section class="highlight-group ${state.highlightsCollapsed[g.id] ? 'collapsed' : ''}" data-group="${g.id}">
-              <button class="highlight-group-head" type="button" data-group-toggle="${g.id}">
+            <section class="highlight-group ${state.highlightsCollapsed[g.id] ? 'collapsed' : ''}" data-group="${esc(g.id)}">
+              <button class="highlight-group-head" type="button" data-group-toggle="${esc(g.id)}">
                 <div class="highlight-group-cover">${renderBookCover({ title: g.title, authors: g.authors, cover_url: g.book_ref ? bookCoverUrl(g.book_ref) : '' }, { variant: 'thumb' })}</div>
                 <div>
                   <h3>${esc(g.title || 'Untitled')}</h3>
@@ -3033,7 +3045,7 @@ async function renderHighlights() {
     const day = new Date().toISOString().slice(0, 10);
     const json = buildHighlightsExportJSON(groupsList);
     downloadTextFile(`kocloud-highlights-${day}.json`, json, 'application/json;charset=utf-8');
-    flashButtonTitle(btn, 'Exported JSON');
+    flashButtonTitle(btn, t('Exported JSON'));
   });
   document.querySelectorAll('[data-group-toggle]').forEach((btn) => {
     btn.addEventListener('click', () => {
@@ -3087,7 +3099,7 @@ function bindAnnotationCopyButtons(root = document) {
       e.stopPropagation();
       const payload = decodeURIComponent(btn.dataset.copyAnnotation || '');
       const ok = await copyTextToClipboard(payload);
-      flashButtonTitle(btn, ok ? 'Copied' : 'Copy failed');
+      flashButtonTitle(btn, ok ? t('Copied') : t('Copy failed'));
       if (ok) flashButtonIcon(btn, 'check', 1000, 'copied');
     });
   });
@@ -3111,43 +3123,6 @@ function buildAnnotationCopyText(a) {
   return lines.join('\n').trim();
 }
 
-function buildHighlightsExportMarkdown(groupsList) {
-  const lines = [
-    '# KoCloud Highlights Export',
-    '',
-    `Exported: ${new Date().toLocaleString()}`,
-    `Books: ${groupsList.length}`,
-    `Items: ${groupsList.reduce((sum, g) => sum + (g.items?.length || 0), 0)}`,
-    '',
-  ];
-
-  groupsList.forEach((g) => {
-    lines.push(`## ${String(g.title || 'Untitled').replace(/\n/g, ' ')}`);
-    if (g.authors) lines.push(`Author: ${String(g.authors).replace(/\n/g, ' ')}`);
-    lines.push('');
-    (g.items || []).forEach((a, idx) => {
-      const kind = getAnnotationKind(a);
-      lines.push(`### ${idx + 1}. ${kind}`);
-      if (a.datetime) lines.push(`- Date: ${formatAnnotationDate(a.datetime)}`);
-      if (a.chapter) lines.push(`- Chapter: ${String(a.chapter).replace(/\n/g, ' ')}`);
-      if (a.pageno) lines.push(`- Page: ${a.pageno}`);
-      if (a.color) lines.push(`- Color: ${String(a.color)}`);
-      lines.push('');
-      if (a.text) {
-        lines.push('> ' + String(a.text).replace(/\n/g, '\n> '));
-        lines.push('');
-      }
-      if (a.note) {
-        lines.push('Note:');
-        lines.push(String(a.note));
-        lines.push('');
-      }
-    });
-    lines.push('');
-  });
-
-  return lines.join('\n').trim() + '\n';
-}
 
 function buildHighlightsExportJSON(groupsList) {
   const rows = [];

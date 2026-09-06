@@ -80,9 +80,16 @@ local function sanitize_title_for_match(s)
     s = s:gsub("zlibrary%.sk", " ")
     s = s:gsub("%b()", " ")
     s = s:gsub("%b[]", " ")
-    s = s:gsub("[\226\128\152\226\128\153\226\128\156\226\128\157]", "") -- ‘ ’ “ ”
-    s = s:gsub("[\226\128\147\226\128\148]", " ") -- – —
-    s = s:gsub("[_%-%.,:;!%?\"'`•]+", " ")
+    -- Byte-safe removal of full-width quotes / dashes (match complete UTF-8
+    -- sequences, never single continuation bytes which would corrupt CJK text)
+    s = s:gsub("\226\128\152", "") -- ‘
+    s = s:gsub("\226\128\153", "") -- ’
+    s = s:gsub("\226\128\156", "") -- “
+    s = s:gsub("\226\128\157", "") -- ”
+    s = s:gsub("\226\128\147", " ") -- –
+    s = s:gsub("\226\128\148", " ") -- —
+    s = s:gsub("•", " ")
+    s = s:gsub("[_%-%.,:;!%?\"'`]+", " ")
     s = s:gsub("%s+", " ")
     s = s:gsub("^%s+", "")
     s = s:gsub("%s+$", "")
@@ -121,7 +128,7 @@ local function score_book_match(book, candidate)
         end
     end
 
-    if (book.pages or 0) > 0 and (candidate.pages or 0) > 0 then
+    if (tonumber(book.pages) or 0) > 0 and (tonumber(candidate.pages) or 0) > 0 then
         if tonumber(book.pages) == tonumber(candidate.pages) then
             score = score + 20
         end
@@ -187,7 +194,8 @@ local function normalize_cover_query(s)
     s = s:gsub("%b()", " ")
     s = s:gsub("%b[]", " ")
     s = s:gsub("%b{}", " ")
-    s = s:gsub("[|｜].*$", " ")
+    s = s:gsub("|.*$", " ")
+    s = s:gsub("\239\189\156.*$", " ") -- ｜ full-width pipe then truncate
     s = s:gsub("%f[%a]novel chapters?%f[%A].*$", " ")
     s = s:gsub("%f[%a]light novel pub%f[%A].*$", " ")
     s = s:gsub("%f[%a]z%-library%f[%A].*$", " ")
@@ -387,8 +395,8 @@ function DataLoader:getBooks()
                 language = sdr_data.doc_props.language or ""
             end
             md5 = sdr_data.partial_md5_checksum
-            doc_pages = sdr_data.doc_pages or 0
-            percent = sdr_data.percent_finished or 0
+            doc_pages = tonumber(sdr_data.doc_pages) or 0
+            percent = tonumber(sdr_data.percent_finished) or 0
             if sdr_data.summary then
                 status = sdr_data.summary.status or "reading"
                 last_open = sdr_data.summary.modified or ""
@@ -1131,27 +1139,30 @@ function DataLoader:getDashboard()
     end)
 
     local total_days = #daily_all
-    local start90 = math.max(1, total_days - 89)
-    local start180 = math.max(1, total_days - 179)
-    local start365 = math.max(1, total_days - 364)
+    -- Calendar-day windows (not "last N rows with reading"): on sparse reading
+    -- schedules the old row-index slicing drifted far from the calendar cutoffs
+    -- used by the SQL below and by the top-books/day maps.
+    local now_noon = parse_date_ymd(os.date("%Y-%m-%d"))
+    local function day_age(d)
+        local t = parse_date_ymd(d and d.date)
+        if not t then return math.huge end
+        return math.floor((now_noon - t) / 86400 + 0.5)
+    end
 
-    for i = start365, total_days do
-        local d = daily_all[i]
-        if d then
+    for _, d in ipairs(daily_all) do
+        if day_age(d) <= 365 then
             payload.series.daily_365d[#payload.series.daily_365d + 1] = d
         end
     end
 
-    for i = start180, total_days do
-        local d = daily_all[i]
-        if d then
+    for _, d in ipairs(daily_all) do
+        if day_age(d) <= 180 then
             payload.series.daily_180d[#payload.series.daily_180d + 1] = d
         end
     end
 
-    for i = start90, total_days do
-        local d = daily_all[i]
-        if d then
+    for _, d in ipairs(daily_all) do
+        if day_age(d) <= 90 then
             table.insert(daily_90, d)
             payload.series.daily_90d[#payload.series.daily_90d + 1] = d
             if (d.duration_sec or 0) > payload.calendar.legend.max_daily_sec_90d then
@@ -1170,16 +1181,16 @@ function DataLoader:getDashboard()
         summary.last_read_date = daily_all[total_days].date or ""
     end
 
-    for i = math.max(1, total_days - 6), total_days do
-        local d = daily_all[i]
-        if d then payload.kpis.last_7_days_time_sec = payload.kpis.last_7_days_time_sec + (d.duration_sec or 0) end
+    for _, d in ipairs(daily_all) do
+        if day_age(d) <= 7 then
+            payload.kpis.last_7_days_time_sec = payload.kpis.last_7_days_time_sec + (d.duration_sec or 0)
+        end
     end
     local days30_count = 0
-    for i = math.max(1, total_days - 29), total_days do
-        local d = daily_all[i]
-        if d then
+    for _, d in ipairs(daily_all) do
+        if day_age(d) <= 30 then
             payload.kpis.last_30_days_time_sec = payload.kpis.last_30_days_time_sec + (d.duration_sec or 0)
-            days30_count = days30_count + 1
+            if (d.duration_sec or 0) > 0 then days30_count = days30_count + 1 end
         end
     end
     if days30_count > 0 then
@@ -1249,9 +1260,8 @@ function DataLoader:getDashboard()
         stmt:close()
     end)
 
-    for i = start180, total_days do
-        local d = daily_all[i]
-        if d and d.date then
+    for _, d in ipairs(daily_all) do
+        if d and d.date and day_age(d) <= 180 then
             local slot = daily_map_180[d.date] or { date = d.date, top_books = {} }
             slot.duration_sec = d.duration_sec or 0
             slot.books_count = d.books_count or 0
@@ -1410,22 +1420,24 @@ function DataLoader:getDashboard()
         end
         local today_noon = parse_date_ymd(os.date("%Y-%m-%d"))
         local streak = 0
-        local expected_ts = today_noon
+        local expect = today_noon
+        local allow_gap = true -- today unread yet: may start from yesterday
         for i = total_days, 1, -1 do
             local d = daily_all[i]
             if d and (d.duration_sec or 0) > 0 then
                 local ts = parse_date_ymd(d.date)
                 if ts then
-                    if expected_ts and ts == expected_ts then
+                    local diff = day_diff(expect, ts)
+                    if diff == 0 then
                         streak = streak + 1
-                        expected_ts = expected_ts - 86400
-                    elseif expected_ts and ts == expected_ts - 86400 and streak == 0 then
-                        -- No reading today yet, but reading yesterday starts current streak.
+                    elseif diff == 1 and streak == 0 and allow_gap then
+                        -- No reading today yet, but reading yesterday starts it.
                         streak = 1
-                        expected_ts = ts - 86400
-                    elseif streak > 0 then
+                    else
                         break
                     end
+                    expect = ts - 86400
+                    allow_gap = false
                 end
             end
         end
@@ -1500,17 +1512,22 @@ function DataLoader:loadSidecar(doc_path)
 
     for _, sdr_dir in ipairs(sidecar_dirs) do
         if lfs.attributes(sdr_dir, "mode") == "directory" then
-            for entry in lfs.dir(sdr_dir) do
-                if entry:match("^metadata%..*%.lua$") and not entry:match("%.old$") then
-                    local fpath = sdr_dir .. "/" .. entry
-                    local ok, data = pcall(dofile, fpath)
-                    if ok and type(data) == "table" then
-                        return data
-                    else
-                        logger.warn("KoCloud: Failed to parse", fpath)
+            local found = nil
+            pcall(function()
+                for entry in lfs.dir(sdr_dir) do
+                    if entry:match("^metadata%..*%.lua$") and not entry:match("%.old$") then
+                        local fpath = sdr_dir .. "/" .. entry
+                        local ok, data = pcall(dofile, fpath)
+                        if ok and type(data) == "table" then
+                            found = data
+                            return
+                        else
+                            logger.warn("KoCloud: Failed to parse", fpath)
+                        end
                     end
                 end
-            end
+            end)
+            if found then return found end
         end
     end
     return nil
