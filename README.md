@@ -56,7 +56,7 @@ QR code from `Tools → KoCloud → Show QR code`, or browse to
 | **Stats** | Reading trend, per-weekday/hourly rhythm, top books, year-long reading-history heatmap |
 | **Calendar** | Day-by-day reading heat + per-day book breakdown |
 | **Highlights** | All annotations grouped by book, search / filter / export |
-| **Cloud** | Annotation & progress sync status, conflict preference, cover backup/restore |
+| **Cloud** | Per-channel remote control: sync current/all books, auto-sync & conflict switches, cover backup/restore, live job progress |
 
 | Web Feature | Description |
 | :--- | :--- |
@@ -79,6 +79,11 @@ folder of your own cloud (WebDAV or Dropbox) — no third-party server involved.
 | Same on both sides | No-op |
 
 Menu: `Tools → KoCloud → Annotation sync`
+
+Web control (Cloud page) mirrors the channel menu: **Sync current book**
+(syncs the most recently opened book on the device) and **Sync all books**,
+plus the three **Auto-sync** switches (written to the same device settings as
+the menu).
 
 | Setting | Description |
 | :--- | :--- |
