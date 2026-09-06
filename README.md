@@ -175,4 +175,91 @@ pushes it through the annotation channel's cloud account:
 - **Author**: ArinChin (maintainer; originally forked from YuchenLi's kodashboard)
 - **Repository**: [github.com/Arin-Chin/KoCloud.koplugin](https://github.com/Arin-Chin/KoCloud.koplugin)
 - **License**: MIT
-- **Version**: 1.0
+- **Version**: 1.1.0
+
+---
+
+## 🧪 Manual Test Checklist — v1.1.0 (post-audit fixes)
+
+Run after deploying a build that includes the audit fixes. KOReader ≥ v2026.07,
+two devices recommended for sync tests. Logs: `crash.log` on the device
+(`grep -n "KoCloud" crash.log` to follow this plugin's lines).
+
+### A. Security & HTTP server
+1. Start the dashboard server, then from a PC on the same LAN request
+   `GET /../settings.reader.lua`, `GET /%2e%2e/settings.reader.lua`,
+   `GET /web/%2e%2e/%2e%2e/etc/passwd` — every one must return **400 Bad path**,
+   never file content.
+2. `GET /style.css`, `GET /app.js?v=…`, `GET /` still serve normally.
+3. POST a body with `Content-Length: 99999999` but send nothing — server must not
+   hang the UI (request dropped after the cap/30s budget); normal cover uploads
+   (≤2 MiB) still work; upload of a non-image with `image/jpeg` header is rejected
+   with **415**.
+4. Web console check: cloud sync / covers endpoints only accept POST — a plain
+   `GET /api/cloud/covers/backup` returns **405** and starts nothing.
+
+### B. Sync core (annotations)
+5. Cold start (fresh process): without opening any menu, POST
+   `api/cloud/covers/backup` from the web page — must succeed (regression for the
+   covers-block-in-`isConfigured` bug) and not error-call-nil.
+6. Annotate a book on device A → sync (menu "Sync current book" or gesture). Device B
+   syncs the same book: highlights/notes/bookmarks appear merged. Verify a
+   `metadata.<ext>.lua.bak` sits next to the synced metadata and no `.old` pile-up.
+7. Delete a highlight on A → sync → B must also lose it (deletion propagation).
+8. Edit the same highlight on both devices while offline → sync → the newer
+   `datetime_updated` wins.
+9. While offline, run "Sync all books" → job finishes and busy flag clears
+   (menu/web both usable afterwards; no "already running" stuck).
+10. Kill network mid-sync → job records failures and stops; UI not frozen for >1s.
+11. Suspend the device during a batch sync → job cancels (no continued per-book
+    network activity after resume).
+
+### C. Reload-loop & lifecycle
+12. Enable auto-sync on book open for BOTH channels → open a book → exactly one sync
+    + at most one document reload. Watch `crash.log`: no repeated
+    `opening file …epub` loop (previous bug: one cycle every ~4 s).
+13. Close the book right after an auto-sync → no crash, no stuck state; open it again
+    normally.
+14. Enable auto-sync on resume → sleep/wake the device with wifi on → one sync fires;
+    without wifi nothing happens.
+
+### D. Progress sync
+15. Two devices read the same EPUB to different spots → sync → target device jumps to
+    the **exact** paragraph of the other side (xpointer), not just a close page.
+    With PDFs it falls back to percentage (page-level precision).
+16. Conflict preference: set "use later progress" → both devices read apart → the
+    bigger percent wins everywhere; switch to "use earlier" → smaller wins.
+17. Closed-book batch sync (FM, no reader open) → next open shows
+    "Synced reading progress is at N%. Jump to it?"; answering Yes jumps, No skips;
+    restarting and reopening does **not** prompt again.
+18. First-sync case: both devices already have progress and never synced before —
+    with "later" the larger percent wins (previously the first-syncer's value won).
+
+### E. Dispatcher / actions
+19. Tools → (gesture manager) new gesture → action list shows
+    **KoCloud: Sync annotations now** and **KoCloud: Sync reading progress now**.
+20. Trigger the annotation gesture without a cloud server configured → short
+    "not configured" toast, no silent no-op.
+
+### F. Web dashboard
+21. Cloud page: status cards show both channels; leave the Cloud view while a sync
+    runs → browser network log shows the 1.2 s poll **stops** after leaving (and when
+    the job ends).
+22. Double-click "Backup covers" quickly → only one job starts.
+23. Books page with a title containing `<`, `&`, full-width `｜`, curly quotes —
+    renders unescaped correctly, cover fetch/dedupe for that book still matches.
+24. Disable storage (private/blocked) → page still loads (no white screen).
+25. Screenshot button: exports the current view as PNG; offline it errors with a
+    toast instead of hanging.
+26. Light theme heat cells visible; on an older WebView without `color-mix` the heat
+    map/calendar still show tinted cells (fallback block).
+27. Rapid double navigation books↔stats on a slow device → content always matches the
+    highlighted nav item (no stale view overwrite).
+
+### G. i18n & brand
+28. KOReader UI in Chinese: all KoCloud menu items show Chinese (incl. the two
+    prefixed dispatcher actions). Browser `zh` → web UI Chinese; browser `en` → English.
+
+### H. Cleanup checks
+29. No `*.baiduyun.uploading.cfg` or stray temp files inside the plugin folder.
+30. `git status` in both local repos clean except your intended commit.
