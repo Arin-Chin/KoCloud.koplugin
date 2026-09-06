@@ -221,6 +221,38 @@ local function ensure_dir(path)
     return ok or lfs.attributes(path, "mode") == "directory"
 end
 
+-- Stable, unique, readable cloud file stem for a book.
+-- slug: built from the file name without its extension; ASCII runs are kept,
+-- every other run (spaces, CJK, …) collapses to one '_'. hash: FNV-1a-32 over
+-- the full raw UTF-8 file name, so equal-length Chinese names never collide.
+local fnv_bit_ok, fnv_bit = pcall(require, "bit")
+local function lua_bxor(a, b)
+    local r, p = 0, 1
+    for _ = 1, 32 do
+        if (a % 2) ~= (b % 2) then r = r + p end
+        a = math.floor(a / 2)
+        b = math.floor(b / 2)
+        p = p * 2
+    end
+    return r
+end
+local function fnv1a32(str)
+    local h = 2166136261
+    for i = 1, #str do
+        local x = fnv_bit_ok and fnv_bit.bxor(h, str:byte(i)) or lua_bxor(h, str:byte(i))
+        h = math.floor((x * 16777619) % 4294967296)
+    end
+    return h
+end
+
+local function cloud_file_stem(doc_path)
+    local raw = (doc_path and doc_path:match("([^/]+)$")) or "book"
+    local slug_base = raw:gsub("%.[^.]*$", "") -- file name without extension
+    local slug = slug_base:gsub("[^%w%.%-%_]+", "_"):gsub("^_+", ""):gsub("_+$", "")
+    if slug == "" then slug = "book" end
+    return slug .. "-" .. string.format("%08x", fnv1a32(raw))
+end
+
 -------------------------------------------------------------------------------
 -- Annotation merge (ported from upstream merge.lua, same semantics)
 -------------------------------------------------------------------------------
@@ -403,15 +435,15 @@ function Sync.syncBook(doc_path, live_annotations, opts)
         if ds then pcall(function() ds:close() end) end
         return nil, "cannot create sidecar dir"
     end
-    local dir_name = sidecar_dir:match("([^/]+)/*$") or "annotations"
     -- Cross-device identity: the carrier's remote name must be the SAME on
-    -- every device for a given book. Only the sidecar dir BASENAME is stable
-    -- across devices (book file name); hashing the full path (as earlier
-    -- audit "fix" did) broke sync between devices with different library
-    -- roots. Constraint (same as upstream): devices must use the same book
-    -- file name. Two different books sharing one file name in different
-    -- folders would collide — accepted, documented.
-    local carrier = sidecar_dir .. "/" .. dir_name:gsub("[^%w%.%-%_]", "_") .. ".json"
+    -- every device for a given book, and it must not collide between books.
+    -- We derive it from the BOOK FILE NAME ONLY (not the sidecar dir, which
+    -- may differ between open/closed sync or hash-based metadata locations):
+    --   <ascii slug of the file name>-<hash8 of the raw name>.<suffix>
+    -- The hash is computed over the full UTF-8 file name, so two books whose
+    -- names collapse to the same slug (e.g. Chinese titles -> '_') still get
+    -- different names. Devices must use the same book file name.
+    local carrier = sidecar_dir .. "/" .. cloud_file_stem(doc_path) .. ".json"
     if not write_json_array(carrier, local_list) then
         if ds then pcall(function() ds:close() end) end
         return nil, "cannot write sync file"
@@ -546,9 +578,9 @@ function Sync.syncBookProgress(doc_path, opts)
         pcall(function() ds:close() end)
         return nil, "cannot create sidecar dir"
     end
-    local dir_name = sidecar_dir:match("([^/]+)/*$") or "annotations"
-    -- Same cross-device identity rule as the annotation channel: basename only.
-    local carrier = sidecar_dir .. "/" .. dir_name:gsub("[^%w%.%-%_]", "_") .. ".progress.json"
+    -- Same cross-device identity rule as the annotation channel (book file
+    -- name only): slug + hash.
+    local carrier = sidecar_dir .. "/" .. cloud_file_stem(doc_path) .. ".progress.json"
     if type(opts.live_xp) == "string" then
         local live = progress_payload(ds)
         live.xp = opts.live_xp

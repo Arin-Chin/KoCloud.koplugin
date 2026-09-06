@@ -179,8 +179,11 @@ pushes it through the annotation channel's cloud account:
 
 ## 🗂️ Sync identity (read first)
 
-A book is identified on the cloud by its **sidecar directory basename** (the
-book file name, e.g. `Name.epub.sdr`). For sync to work across devices:
+A book is identified on the cloud by its **file name**: the carrier file
+is named `<slug>-<hash8>.json` where the slug is the readable ASCII part
+of the file name (spaces/Chinese runs collapse to `_`; a pure-CJK name falls
+back to `book`) and the 8-hex FNV hash of the full UTF-8 file name makes the
+name collision-proof even for equal-length names. For sync to work across devices:
 
 - The **book file name must be identical on every device**. Different library
   roots are fine — only the basename is used (an earlier build hashed the full
@@ -195,9 +198,8 @@ Other notes:
   that just means "not on the cloud yet"; the file is then uploaded.
 - Two different books that happen to share one file name (in different folders)
   would collide on the cloud — rename one of them.
-- Orphan files named `*-xxxxxxxx.json` in the cloud folder (left by an
-  experimental build) can be deleted; current builds use plain `*.json` /
-  `*.progress.json`.
+- When the naming scheme changes, delete the old carrier files from the
+  cloud folder once; every book re-uploads under its new name on the next sync.
 
 ---
 ---
