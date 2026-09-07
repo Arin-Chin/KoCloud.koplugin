@@ -2605,3 +2605,22 @@ html[data-color-scheme='dark'] .month-pill.is-active {
 .cloud-view .section-head .section-note {
   margin: 0;
 }
+
+/* Cloud page conflict/option chips — selected state tuned for clear text on
+   both themes: day = deep teal fill + white text; night = bright pink fill +
+   dark bold text. Overrides the generic month-pill active rules. */
+.cloud-view .month-pill.active,
+.cloud-view .month-pill.is-active {
+  color: #ffffff;
+  font-weight: 800;
+  background: #00766c;
+  border-color: rgba(255, 255, 255, 0.35);
+  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.18);
+}
+html[data-color-scheme='dark'] .cloud-view .month-pill.active,
+html[data-color-scheme='dark'] .cloud-view .month-pill.is-active {
+  color: #2b0f23;
+  background: #f4a8dd;
+  border-color: rgba(255, 255, 255, 0.55);
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.35);
+}
