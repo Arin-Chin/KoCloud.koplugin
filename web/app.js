@@ -2669,7 +2669,10 @@ async function renderCloud() {
           <p class="hero-sub">${t('Push and pull highlights and notes with your WebDAV or Dropbox.')}</p>
         </section>
         <article class="panel cloud-storage-card">
-          <div class="hero-card-head"><span>${t('Cloud storage')}</span>${cloudStatusBadge(status)}</div>
+          <div class="section-head">
+            <div><div class="section-kicker">${t('Cloud storage')}</div></div>
+            ${cloudStatusBadge(status)}
+          </div>
           <div class="cloud-storage-lines">
             <div><strong>${t('Annotations')}</strong>: ${status && status.configured ? esc(status.name || '') + (status.path ? ' · ' + esc(status.path) : '') : t('Not configured')}</div>
             <div><strong>${t('Progress sync')}</strong>: ${status && status.progress && status.progress.configured ? esc(status.progress.name || '') + (status.progress.path ? ' · ' + esc(status.progress.path) : '') : t('Not configured')}</div>

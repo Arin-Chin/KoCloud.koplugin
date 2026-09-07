@@ -2575,3 +2575,10 @@ html[data-color-scheme='dark'] .month-pill.is-active {
   overflow-wrap: anywhere;
   word-break: break-word;
 }
+
+/* Cloud storage card header reuses the standard section-head style. */
+.cloud-storage-card .section-head { justify-content: space-between; align-items: center; }
+.cloud-storage-card .section-head .section-kicker { margin: 0; }
+
+/* Last-resort containment: nothing may visually poke outside the page block. */
+.cloud-view { max-width: 100%; overflow: hidden; }
