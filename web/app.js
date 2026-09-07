@@ -2654,29 +2654,11 @@ async function setCloudConflict(value) {
   }
 }
 
-async function toggleCloudAuto(channel, key, on) {
-  try {
-    await apiNoCachePost('cloud/settings/auto', { channel, key, on });
-    renderCloud();
-  } catch (e) {
-    window.alert(t('Cloud sync failed: %1', e && e.message ? e.message : String(e)));
-  }
-}
-
 async function renderCloud() {
   clearCloudPoll();
   const cloudToken = renderToken;
   const status = await apiNoCache('cloud/status').catch(() => null);
   const act = await apiNoCache('cloud/activity').catch(() => ({}));
-
-  const autoFlags = (status && status.auto) || {};
-  const autoChips = [
-    [autoFlags.open, 'on book open'],
-    [autoFlags.close, 'on book close'],
-    [autoFlags.resume, 'on resume'],
-  ].map(([on, key]) =>
-    `<span class="insight-chip">${on ? '● ' : '○ '}${t(key)}</span>`
-  ).join('');
 
   $content.innerHTML = `
     <div class="view-fade cloud-view">
@@ -2689,17 +2671,32 @@ async function renderCloud() {
         <div class="hero-grid">
           <article class="hero-card panel">
             <div class="hero-card-head"><span>${t('Cloud storage')}</span>${cloudStatusBadge(status)}</div>
-            <div class="hero-card-value hero-card-value-display">${status && status.name ? esc(status.name) : t('Not configured')}</div>
-            <div class="hero-card-sub">${status && status.path ? esc(status.path) : ''}</div>
-          </article>
-          <article class="hero-card panel">
-            <div class="hero-card-head"><span>${t('Auto-sync')}</span></div>
-            <div class="cloud-auto-chips">${autoChips || ''}</div>
+            <div class="cloud-storage-lines">
+              <div><strong>${t('Annotations')}</strong>: ${status && status.configured ? esc(status.name || '') + (status.path ? ' · ' + esc(status.path) : '') : t('Not configured')}</div>
+              <div><strong>${t('Progress sync')}</strong>: ${status && status.progress && status.progress.configured ? esc(status.progress.name || '') + (status.progress.path ? ' · ' + esc(status.progress.path) : '') : t('Not configured')}</div>
+            </div>
+            ${status && !status.available ? `<div class="hero-card-sub">${esc((status && status.reason) || t('Cloud sync unavailable'))}</div>` : ''}
           </article>
         </div>
       </section>
 
       <section class="stats-layout">
+        <article class="panel cloud-activity-panel">
+          <div class="section-head">
+            <div><div class="section-kicker">${t('Activity')}</div><h2 id="cloudState">${act && act.running ? t('Running') : t('Finished')}</h2></div>
+            <div class="section-note" id="cloudCount">${t((act && act.kind) || 'annotations')} · ${fmtNumber(act && act.done || 0)} / ${fmtNumber(act && act.total || 0)}</div>
+          </div>
+          <div class="cover-pull-progress"><div id="cloudBarFill" style="width:${act && act.total ? Math.round(((act.done || 0) / act.total) * 100) : 0}%"></div></div>
+          <div class="cover-pull-meta">
+            <span>${t('ok')}: <strong id="cloudOk">${fmtNumber(act && act.ok || 0)}</strong></span>
+            <span>${t('skipped')}: <strong id="cloudSkip">${fmtNumber(act && act.skipped || 0)}</strong></span>
+            <span>${t('failed')}: <strong id="cloudFail">${fmtNumber(act && act.failed || 0)}</strong></span>
+          </div>
+          <div class="section-note">${t('Current book')}: <span id="cloudCurrent">${esc((act && act.current) || '')}</span></div>
+          <div class="cover-pull-errors" id="cloudErrors">${toArray(act && act.errors).map((e) => `<div>${esc(e)}</div>`).join('')}</div>
+          ${act && (act.started_at || act.finished_at) ? `<div class="section-note">${t('Last sync')}: ${formatSyncTime(act.finished_at || act.started_at)}</div>` : `<div class="empty-inline">${t('No sync job yet')}</div>`}
+        </article>
+
         <article class="panel cloud-actions-panel">
           <div class="section-head">
             <div><div class="section-kicker">${t('Annotations')}</div><h2>${t('Annotations')}</h2></div>
@@ -2708,10 +2705,6 @@ async function renderCloud() {
             <div class="cloud-actions-row">
               <button class="ghost-btn" id="cloudCurrentBtn" ${(status && status.configured && !(status && status.busy)) ? '' : 'disabled'} title="${t('Sync current book')}">${icon('cloud', 14)} ${t('Sync current book')}</button>
               <button class="ghost-btn" id="cloudSyncBtn" ${(status && status.configured && !(status && status.busy)) ? '' : 'disabled'} title="${t('Sync all books')}">${icon('cloud', 14)} ${t('Sync all books')}</button>
-            </div>
-            <div class="cloud-actions-row">
-              <span class="section-note" style="margin:0">${t('Auto-sync')}:</span>
-              ${['open', 'close', 'resume'].map((k) => `<button class="pill month-pill ${(status && status.auto && status.auto[k]) ? 'active' : ''}" type="button" data-cloud-auto="${k}" data-channel="annotations">${t(k === 'open' ? 'on book open' : k === 'close' ? 'on book close' : 'on resume')}</button>`).join('')}
             </div>
             <div class="cloud-actions-row">
               <span class="section-note" style="margin:0">${t('Covers')}:</span>
@@ -2737,32 +2730,14 @@ async function renderCloud() {
               <button class="pill month-pill ${status && status.progress && status.progress.conflict !== 'earlier' ? 'active' : ''}" type="button" data-conflict="later">${t('Use later progress')}</button>
               <button class="pill month-pill ${status && status.progress && status.progress.conflict === 'earlier' ? 'active' : ''}" type="button" data-conflict="earlier">${t('Use earlier progress')}</button>
             </div>
-            <div class="cloud-actions-row">
-              <span class="section-note" style="margin:0">${t('Auto-sync')}:</span>
-              ${['open', 'close', 'resume'].map((k) => `<button class="pill month-pill ${(status && status.progress && status.progress.auto && status.progress.auto[k]) ? 'active' : ''}" type="button" data-cloud-auto="${k}" data-channel="progress">${t(k === 'open' ? 'on book open' : k === 'close' ? 'on book close' : 'on resume')}</button>`).join('')}
-            </div>
             <p class="section-note">${status && status.progress && status.progress.configured
               ? (status.progress.name ? esc(status.progress.name) : '') + (status.progress.path ? ' · ' + esc(status.progress.path) : '')
               : ''}</p>
-            <p class="section-note">${status && !status.progress.configured ? t('Configure in KOReader menu: Tools → KoCloud → Progress sync.') : ''}</p>
+            <p class="section-note">${status && status.progress && !status.progress.configured ? t('Configure in KOReader menu: Tools → KoCloud → Progress sync.') : ''}</p>
           </div>
         </article>
 
-        <article class="panel cloud-activity-panel">
-          <div class="section-head">
-            <div><div class="section-kicker">${t('Activity')}</div><h2 id="cloudState">${act && act.running ? t('Running') : t('Finished')}</h2></div>
-            <div class="section-note" id="cloudCount">${t((act && act.kind) || 'annotations')} · ${fmtNumber(act && act.done || 0)} / ${fmtNumber(act && act.total || 0)}</div>
-          </div>
-          <div class="cover-pull-progress"><div id="cloudBarFill" style="width:${act && act.total ? Math.round(((act.done || 0) / act.total) * 100) : 0}%"></div></div>
-          <div class="cover-pull-meta">
-            <span>${t('ok')}: <strong id="cloudOk">${fmtNumber(act && act.ok || 0)}</strong></span>
-            <span>${t('skipped')}: <strong id="cloudSkip">${fmtNumber(act && act.skipped || 0)}</strong></span>
-            <span>${t('failed')}: <strong id="cloudFail">${fmtNumber(act && act.failed || 0)}</strong></span>
-          </div>
-          <div class="section-note">${t('Current book')}: <span id="cloudCurrent">${esc((act && act.current) || '')}</span></div>
-          <div class="cover-pull-errors" id="cloudErrors">${toArray(act && act.errors).map((e) => `<div>${esc(e)}</div>`).join('')}</div>
-          ${act && (act.started_at || act.finished_at) ? `<div class="section-note">${t('Last sync')}: ${formatSyncTime(act.finished_at || act.started_at)}</div>` : `<div class="empty-inline">${t('No sync job yet')}</div>`}
-        </article>
+        
       </section>
     </div>`;
 
@@ -2774,10 +2749,6 @@ async function renderCloud() {
   document.getElementById('cloudProgressCurrentBtn')?.addEventListener('click', () => startCloudCurrent('progress'));
   document.getElementById('cloudProgressBtn')?.addEventListener('click', startCloudProgress);
   document.querySelectorAll('[data-conflict]').forEach((b) => b.addEventListener('click', () => setCloudConflict(b.dataset.conflict)));
-  document.querySelectorAll('[data-cloud-auto]').forEach((b) => b.addEventListener('click', () => {
-    const on = !b.classList.contains('active');
-    toggleCloudAuto(b.dataset.channel, b.dataset.cloudAuto, on);
-  }));
   bindTooltips($content);
   if (act && act.running) pollCloudActivity();
 }

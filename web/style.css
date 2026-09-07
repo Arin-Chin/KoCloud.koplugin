@@ -2503,3 +2503,17 @@ html[data-color-scheme='dark'] .month-pill.active,
 html[data-color-scheme='dark'] .month-pill.is-active {
   color: #0b1020;
 }
+
+/* Cloud storage card: one line per channel (name · path). */
+.cloud-storage-lines {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: .8rem;
+  line-height: 1.45;
+  color: var(--text-dim);
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.cloud-storage-lines strong { color: var(--text); }
