@@ -2488,3 +2488,18 @@ html[data-color-scheme='light'] .calendar-cell {
     background: linear-gradient(180deg, rgba(246, 167, 223, 0.9), rgba(79, 217, 166, 0.22));
   }
 }
+
+/* Selected pill/chip legibility: text must contrast against the solid accent
+   background in BOTH themes (var(--bg-0) is near-white in light and near-black
+   in dark, which can wash out on the accent fill). Day = white text on teal,
+   night = dark text on the light pink accent. */
+.pill.active,
+.month-pill.active,
+.month-pill.is-active {
+  color: #ffffff;
+}
+html[data-color-scheme='dark'] .pill.active,
+html[data-color-scheme='dark'] .month-pill.active,
+html[data-color-scheme='dark'] .month-pill.is-active {
+  color: #0b1020;
+}
