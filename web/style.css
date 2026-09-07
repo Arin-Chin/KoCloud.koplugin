@@ -2547,3 +2547,31 @@ html[data-color-scheme='dark'] .month-pill.is-active {
 @media (max-width: 760px) {
   .cloud-hero-row { grid-template-columns: 1fr; }
 }
+
+/* Cloud page: keep every block's content inside its edges — allow wrapping,
+   shrinking and long-string breaks everywhere (buttons/pills default to
+   nowrap and overflow on narrow rows). */
+.cloud-view .panel,
+.cloud-view .cloud-actions-row,
+.cloud-view .cloud-storage-lines,
+.cloud-view .cloud-intro-panel {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.cloud-view .cloud-actions-row {
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+}
+.cloud-view .ghost-btn,
+.cloud-view .pill,
+.cloud-view .month-pill {
+  white-space: normal;
+  max-width: 100%;
+}
+.cloud-view .cloud-storage-lines > div,
+.cloud-view .section-note {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
