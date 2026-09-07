@@ -2662,25 +2662,23 @@ async function renderCloud() {
 
   $content.innerHTML = `
     <div class="view-fade cloud-view">
-      <section class="hero-shell compact">
-        <div class="hero-copy">
+      <div class="cloud-hero-row">
+        <section class="panel cloud-intro-panel">
           <div class="eyebrow">${t('Cloud sync')}</div>
-          <h1 class="hero-title">${t('Your annotations, in the cloud.')}</h1>
+          <h2 class="cloud-intro-title">${t('Your annotations, in the cloud.')}</h2>
           <p class="hero-sub">${t('Push and pull highlights and notes with your WebDAV or Dropbox.')}</p>
-        </div>
-        <div class="hero-grid">
-          <article class="hero-card panel">
-            <div class="hero-card-head"><span>${t('Cloud storage')}</span>${cloudStatusBadge(status)}</div>
-            <div class="cloud-storage-lines">
-              <div><strong>${t('Annotations')}</strong>: ${status && status.configured ? esc(status.name || '') + (status.path ? ' · ' + esc(status.path) : '') : t('Not configured')}</div>
-              <div><strong>${t('Progress sync')}</strong>: ${status && status.progress && status.progress.configured ? esc(status.progress.name || '') + (status.progress.path ? ' · ' + esc(status.progress.path) : '') : t('Not configured')}</div>
-            </div>
-            ${status && !status.available ? `<div class="hero-card-sub">${esc((status && status.reason) || t('Cloud sync unavailable'))}</div>` : ''}
-          </article>
-        </div>
-      </section>
+        </section>
+        <article class="panel cloud-storage-card">
+          <div class="hero-card-head"><span>${t('Cloud storage')}</span>${cloudStatusBadge(status)}</div>
+          <div class="cloud-storage-lines">
+            <div><strong>${t('Annotations')}</strong>: ${status && status.configured ? esc(status.name || '') + (status.path ? ' · ' + esc(status.path) : '') : t('Not configured')}</div>
+            <div><strong>${t('Progress sync')}</strong>: ${status && status.progress && status.progress.configured ? esc(status.progress.name || '') + (status.progress.path ? ' · ' + esc(status.progress.path) : '') : t('Not configured')}</div>
+          </div>
+          ${status && !status.available ? `<div class="hero-card-sub">${esc((status && status.reason) || t('Cloud sync unavailable'))}</div>` : ''}
+        </article>
+      </div>
 
-      <section class="stats-layout">
+      <div class="cloud-stack">
         <article class="panel cloud-activity-panel">
           <div class="section-head">
             <div><div class="section-kicker">${t('Activity')}</div><h2 id="cloudState">${act && act.running ? t('Running') : t('Finished')}</h2></div>
@@ -2738,7 +2736,7 @@ async function renderCloud() {
         </article>
 
         
-      </section>
+      </div>
     </div>`;
 
   if (cloudToken !== renderToken) return; // stale render (still poll if started)

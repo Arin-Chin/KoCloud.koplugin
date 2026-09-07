@@ -2517,3 +2517,33 @@ html[data-color-scheme='dark'] .month-pill.is-active {
   word-break: break-word;
 }
 .cloud-storage-lines strong { color: var(--text); }
+
+/* Cloud page rows: intro + storage share one row (equal halves); each of
+   activity / annotations / progress is one full-width row, all equal. */
+.cloud-hero-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  margin-bottom: 14px;
+}
+.cloud-intro-panel {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+.cloud-intro-title {
+  font-family: var(--font-display);
+  font-size: 1.5rem;
+  margin: 6px 0 4px;
+  color: var(--text);
+}
+.cloud-storage-card { min-width: 0; }
+.cloud-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.cloud-stack > .panel { margin-bottom: 0; }
+@media (max-width: 760px) {
+  .cloud-hero-row { grid-template-columns: 1fr; }
+}
