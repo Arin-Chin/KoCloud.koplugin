@@ -496,6 +496,12 @@ function Api.handleRequest(server, reqinfo, path, full_uri)
         return ev
     end
 
+    -- Cached cover by md5 key (stats ranking fallback, history-independent)
+    local md5_cover = path:match("^/api/covers/md5/([0-9a-fA-F]+)$")
+    if md5_cover then
+        return Api.sendMd5Cover(server, reqinfo, md5_cover)
+    end
+
     local cover_book_ref = path:match("^/api/books/([^/]+)/cover$")
     if cover_book_ref then
         return Api.sendBookCover(server, reqinfo, cover_book_ref)
@@ -670,6 +676,37 @@ function Api.sendBookCover(server, reqinfo, book_ref)
     local body = f:read("*all")
     f:close()
     return server:sendResponse(reqinfo, 200, cover_info.content_type or CTYPE.JPEG, body)
+end
+
+-- Serve a cached cover directly by its md5 key (no history record needed).
+-- Used by the stats top-books ranking for books absent from the reading
+-- history. Key is validated hex-only, so no path traversal surface.
+function Api.sendMd5Cover(server, reqinfo, md5)
+    if reqinfo.method ~= "GET" then
+        return server:sendResponse(reqinfo, 405, CTYPE.TEXT, "Method not allowed")
+    end
+    local dir = get_cover_storage_dir()
+    if lfs.attributes(dir, "mode") ~= "directory" then
+        return server:sendResponse(reqinfo, 404, CTYPE.TEXT, "cover not found")
+    end
+    local exts = { ".jpg", ".jpeg", ".png", ".webp", ".gif" }
+    for _, ext in ipairs(exts) do
+        local path = dir .. "/" .. md5 .. ext
+        if lfs.attributes(path, "mode") == "file" then
+            local f = io.open(path, "rb")
+            if not f then
+                return server:sendResponse(reqinfo, 404, CTYPE.TEXT, "cover not readable")
+            end
+            local body = f:read("*all")
+            f:close()
+            local ctype = ext == ".png" and CTYPE.PNG
+                or (ext == ".webp" and CTYPE.WEBP)
+                or (ext == ".gif" and CTYPE.GIF)
+                or CTYPE.JPEG
+            return server:sendResponse(reqinfo, 200, ctype, body)
+        end
+    end
+    return server:sendResponse(reqinfo, 404, CTYPE.TEXT, "cover not found")
 end
 
 function Api.route(path, full_uri, reqinfo)

@@ -1308,6 +1308,19 @@ function updateActiveNav() {
 /* ============================================================
    Data adapters
    ============================================================ */
+/* Stats top-books fallback: when a book is missing from the reading history
+   (so the history-based resolver cannot map it), still try the md5-keyed
+   cover cache directly. A missing cached file 404s and the generated
+   placeholder stays visible. */
+function md5CoverFallback(item) {
+  if (!item || item.cover_url) return item;
+  const md5 = String((item && item.md5) || '').trim();
+  if (/^[0-9a-fA-F]{32}$/.test(md5)) {
+    return Object.assign({}, item, { cover_url: '/api/covers/md5/' + md5.toLowerCase() + '?v=' + (state.coverVersion || 0) });
+  }
+  return item;
+}
+
 function findBestStatsMatch(book, statsBooks = [], statsIndexes = null) {
   if (!book) return null;
   const indexes = statsIndexes || buildStatsIndexes(statsBooks);
@@ -1836,8 +1849,8 @@ async function renderStats() {
   const allBooks = dedupeBooksForDisplay(toArray(booksResp.books));
   allBooks.forEach((b) => { b.cover_url = bookCoverUrl(b.id); });
   const coverResolver = buildLibraryCoverResolver(allBooks);
-  const topByTime = getTopBooksByDays(dash.top_books || {}, 'time', trendDays).map(coverResolver);
-  const topByPages = getTopBooksByDays(dash.top_books || {}, 'pages', trendDays).map(coverResolver);
+  const topByTime = getTopBooksByDays(dash.top_books || {}, 'time', trendDays).map(coverResolver).map(md5CoverFallback);
+  const topByPages = getTopBooksByDays(dash.top_books || {}, 'pages', trendDays).map(coverResolver).map(md5CoverFallback);
   if (statsToken !== renderToken) return; // stale render
   $content.innerHTML = `
     <div class="view-fade stats-view">
