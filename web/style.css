@@ -2582,3 +2582,26 @@ html[data-color-scheme='dark'] .month-pill.is-active {
 
 /* Last-resort containment: nothing may visually poke outside the page block. */
 .cloud-view { max-width: 100%; overflow: hidden; }
+
+/* Cloud page blocks: restore comfortable inner padding & spacing like the
+   other pages' panels (lost when the layout moved off .stats-layout). */
+.cloud-view .panel {
+  padding: 16px 18px;
+}
+.cloud-view .section-head {
+  margin-bottom: 10px;
+}
+.cloud-view .cloud-actions,
+.cloud-view .cloud-actions-row,
+.cloud-view .cloud-storage-lines {
+  row-gap: 10px;
+  column-gap: 10px;
+}
+.cloud-view .cloud-actions > p.section-note,
+.cloud-view .cloud-actions-row + .section-note {
+  margin: 2px 0 0;
+}
+.cloud-view .section-head h2,
+.cloud-view .section-head .section-note {
+  margin: 0;
+}
