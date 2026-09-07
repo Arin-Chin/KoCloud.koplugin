@@ -2728,9 +2728,6 @@ async function renderCloud() {
               <button class="pill month-pill ${status && status.progress && status.progress.conflict !== 'earlier' ? 'active' : ''}" type="button" data-conflict="later">${t('Use later progress')}</button>
               <button class="pill month-pill ${status && status.progress && status.progress.conflict === 'earlier' ? 'active' : ''}" type="button" data-conflict="earlier">${t('Use earlier progress')}</button>
             </div>
-            <p class="section-note">${status && status.progress && status.progress.configured
-              ? (status.progress.name ? esc(status.progress.name) : '') + (status.progress.path ? ' · ' + esc(status.progress.path) : '')
-              : ''}</p>
             <p class="section-note">${status && status.progress && !status.progress.configured ? t('Configure in KOReader menu: Tools → KoCloud → Progress sync.') : ''}</p>
           </div>
         </article>
